@@ -1,6 +1,6 @@
 # PLAN.md: Rebuild `fme/` into the `dagster-fme` uv package
 
-Status: **not started**. Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
+Status: **in progress** (Phase 0 done). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
 
 ## Goal
 
@@ -53,9 +53,9 @@ Pin this with a test.
 
 ## Phase 0: Repository bootstrap
 
-- [ ] Add `.gitignore` (Python, `__pycache__/`, `.venv/`, `.pytest_cache/`, `.ruff_cache/`, `.coverage`, `dist/`).
-- [ ] Rename branch `master` to `main`. Make the initial commit on `main`: the original `fme/` (no `__pycache__`), `AGENTS.md`, `CLAUDE.md`, `PLAN.md`, `.gitignore`.
-- [ ] Create and switch to branch `rebuild/uv-package`.
+- [x] Add `.gitignore` (Python, `__pycache__/`, `.venv/`, `.pytest_cache/`, `.ruff_cache/`, `.coverage`, `dist/`).
+- [x] Rename branch `master` to `main`. Make the initial commit on `main`: the original `fme/` (no `__pycache__`), `AGENTS.md`, `CLAUDE.md`, `PLAN.md`, `.gitignore`.
+- [x] Create and switch to branch `rebuild/uv-package`.
 
 ## Phase 1: uv project skeleton and tooling
 
