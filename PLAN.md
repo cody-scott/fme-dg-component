@@ -1,6 +1,6 @@
 # PLAN.md: Rebuild `fme/` into the `dagster-fme` uv package
 
-Status: **not started**. Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
+Status: **in progress** (Phases 0–1 done). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
 
 ## Goal
 
@@ -53,23 +53,23 @@ Pin this with a test.
 
 ## Phase 0: Repository bootstrap
 
-- [ ] Add `.gitignore` (Python, `__pycache__/`, `.venv/`, `.pytest_cache/`, `.ruff_cache/`, `.coverage`, `dist/`).
-- [ ] Rename branch `master` to `main`. Make the initial commit on `main`: the original `fme/` (no `__pycache__`), `AGENTS.md`, `CLAUDE.md`, `PLAN.md`, `.gitignore`.
-- [ ] Create and switch to branch `rebuild/uv-package`.
+- [x] Add `.gitignore` (Python, `__pycache__/`, `.venv/`, `.pytest_cache/`, `.ruff_cache/`, `.coverage`, `dist/`).
+- [x] Rename branch `master` to `main`. Make the initial commit on `main`: the original `fme/` (no `__pycache__`), `AGENTS.md`, `CLAUDE.md`, `PLAN.md`, `.gitignore`.
+- [x] Create and switch to branch `rebuild/uv-package`.
 
 ## Phase 1: uv project skeleton and tooling
 
-- [ ] `uv init --lib --build-backend uv --name dagster-fme`. Confirm it creates `src/dagster_fme/` and `py.typed`.
-- [ ] `pyproject.toml`: `requires-python = ">=3.10"`, deps `dagster>=1.11`, `httpx`. Add a description, a README, and the classifiers.
-- [ ] Dev deps (`[dependency-groups] dev`): `pytest`, `pytest-cov`, `respx`, `ruff`, `pyright`, `pre-commit`, plus `dagster-dg-cli` if it's needed to test scaffolding.
-- [ ] Ruff config: line length 100, target `py310`, rules `E,F,I,UP,B,SIM,RUF`, `ruff format`.
-- [ ] Pyright config: `include = ["src", "tests"]`, `typeCheckingMode = "standard"`, `pythonVersion = "3.10"`.
-- [ ] Pytest config: `testpaths = ["tests"]`, `addopts = "-ra --strict-markers"`, `xfail_strict = true`.
-- [ ] `.pre-commit-config.yaml`: ruff (check + format), basic hooks (trailing whitespace, EOF, check-yaml/toml), and a local hook for pyright via `uv run`.
-- [ ] `.github/workflows/ci.yml`: use `astral-sh/setup-uv`, matrix Python 3.10–3.13, steps `uv sync --locked`, ruff check, ruff format `--check`, pyright, pytest with coverage. Add a separate job with `--resolution lowest-direct` to prove the `dagster>=1.11` floor.
-- [ ] Commit `uv.lock`.
-- [ ] Gate: `uv sync && uv run pytest` runs (no tests yet is fine), and lint and pyright are clean.
-- [ ] Commit: `Phase 1: uv project skeleton and tooling`.
+- [x] `uv init --lib --build-backend uv --name dagster-fme`. Confirm it creates `src/dagster_fme/` and `py.typed`.
+- [x] `pyproject.toml`: `requires-python = ">=3.10"`, deps `dagster>=1.11`, `httpx`. Add a description, a README, and the classifiers.
+- [x] Dev deps (`[dependency-groups] dev`): `pytest`, `pytest-cov`, `respx`, `ruff`, `pyright`, `pre-commit`, plus `dagster-dg-cli` if it's needed to test scaffolding (deferred to Phase 5). Notes: `pyright[nodejs]` because the system Node (v10) is too old. (`pre-commit` was briefly capped `<4.6` for git 2.25; git is now 2.50 so the cap is removed.)
+- [x] Ruff config: line length 100, target `py310`, rules `E,F,I,UP,B,SIM,RUF`, `ruff format`.
+- [x] Pyright config: `include = ["src", "tests"]`, `typeCheckingMode = "standard"`, `pythonVersion = "3.10"`.
+- [x] Pytest config: `testpaths = ["tests"]`, `addopts = "-ra --strict-markers"`, `xfail_strict = true`.
+- [x] `.pre-commit-config.yaml`: ruff (check + format), basic hooks (trailing whitespace, EOF, check-yaml/toml), and a local hook for pyright via `uv run`.
+- [ ] **Deferred** (needs a `workflow`-scoped GitHub token to push; kept locally on `rebuild/uv-package`) `.github/workflows/ci.yml`: use `astral-sh/setup-uv`, matrix Python 3.10–3.13, steps `uv sync --locked`, ruff check, ruff format `--check`, pyright, pytest with coverage. Add a separate job with `--resolution lowest-direct` to prove the `dagster>=1.11` floor.
+- [x] Commit `uv.lock`.
+- [x] Gate: `uv sync && uv run pytest` runs (no tests yet is fine), and lint and pyright are clean.
+- [x] Commit: `Phase 1: uv project skeleton and tooling`.
 
 ## Phase 2: Port the code, keep behaviour, and pin current behaviour with tests
 
