@@ -66,7 +66,7 @@ Pin this with a test.
 - [x] Pyright config: `include = ["src", "tests"]`, `typeCheckingMode = "standard"`, `pythonVersion = "3.10"`.
 - [x] Pytest config: `testpaths = ["tests"]`, `addopts = "-ra --strict-markers"`, `xfail_strict = true`.
 - [x] `.pre-commit-config.yaml`: ruff (check + format), basic hooks (trailing whitespace, EOF, check-yaml/toml), and a local hook for pyright via `uv run`.
-- [ ] **Deferred** (needs a `workflow`-scoped GitHub token to push; kept locally on `rebuild/uv-package`) `.github/workflows/ci.yml`: use `astral-sh/setup-uv`, matrix Python 3.10–3.13, steps `uv sync --locked`, ruff check, ruff format `--check`, pyright, pytest with coverage. Add a separate job with `--resolution lowest-direct` to prove the `dagster>=1.11` floor.
+- [x] `.github/workflows/ci.yml` (landed after Phase 2 once the token had `workflow` scope): use `astral-sh/setup-uv`, matrix Python 3.10–3.13, steps `uv sync --locked`, ruff check, ruff format `--check`, pyright, pytest with coverage. Add a separate job with `--resolution lowest-direct` to prove the `dagster>=1.11` floor.
 - [x] Commit `uv.lock`.
 - [x] Gate: `uv sync && uv run pytest` runs (no tests yet is fine), and lint and pyright are clean.
 - [x] Commit: `Phase 1: uv project skeleton and tooling`.
