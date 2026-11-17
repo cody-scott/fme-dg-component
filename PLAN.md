@@ -29,7 +29,7 @@ and handling failed FME jobs (the sensor stays success-only).
 | dg integration | Registry entry point and a custom scaffolder that writes a starter `defs.yaml` |
 | Failed jobs | Not handled (success only) |
 | Old `fme/` dir | Deleted after the port |
-| Git | Initial import commit on `main`, then work on the `rebuild/uv-package` branch with per-phase commits |
+| Git | Initial import commit on `main`, then one `phase-<n>/<slug>` branch and PR to `main` per phase (see `AGENTS.md`) |
 
 ## Known bugs in the original code
 
@@ -55,7 +55,7 @@ Pin this with a test.
 
 - [x] Add `.gitignore` (Python, `__pycache__/`, `.venv/`, `.pytest_cache/`, `.ruff_cache/`, `.coverage`, `dist/`).
 - [x] Rename branch `master` to `main`. Make the initial commit on `main`: the original `fme/` (no `__pycache__`), `AGENTS.md`, `CLAUDE.md`, `PLAN.md`, `.gitignore`.
-- [x] Create and switch to branch `rebuild/uv-package`.
+- [x] Create and switch to branch `rebuild/uv-package`. (Superseded: from Phase 1 on, each phase uses its own `phase-<n>/<slug>` branch and PR.)
 
 ## Phase 1: uv project skeleton and tooling
 
@@ -170,7 +170,7 @@ Do one bug per commit. In each commit, remove that bug's xfail marker so it beco
 - [ ] Delete the original `fme/` directory.
 - [ ] Final gate: `uv run pre-commit run --all-files`, pytest coverage of at least 90%, and the lowest-direct job passes.
 - [ ] Commit: `Phase 6: docs, remove legacy fme module`.
-- [ ] Ask the user before pushing the branch or opening a PR.
+- [ ] Ask the user before pushing the `phase-6/...` branch or opening its PR.
 
 ---
 
