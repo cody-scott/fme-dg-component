@@ -14,6 +14,8 @@ All notable changes to `dagster-fme` are recorded here. The format follows
   the shared key, instead of Dagster's later duplicate-key error.
 - N-8: a cursor timestamp with no timezone (e.g. hand-edited) is read as UTC instead of
   raising `TypeError` when compared with FME's times. It's written back with `+00:00`.
+- N-9: `dg scaffold defs --append` starts the `---` separator on a new line when the existing
+  `defs.yaml` doesn't end with one, so the result stays valid YAML.
 
 ### Changed
 

@@ -112,7 +112,6 @@ def test_scaffold_append_adds_a_second_document(tmp_path: Path) -> None:
     assert [d["type"] for d in docs] == ["other.Component", TYPE_NAME]
 
 
-@pytest.mark.xfail(strict=True, reason="N-9: append joins --- onto a last line with no newline")
 @pytest.mark.skipif(not SUPPORTS_APPEND, reason="ScaffoldRequest.append needs Dagster > 1.11")
 def test_scaffold_append_without_trailing_newline(tmp_path: Path) -> None:
     defs_yaml = tmp_path / "defs.yaml"

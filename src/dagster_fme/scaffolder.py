@@ -41,7 +41,10 @@ class FMEComponentScaffolder(dg.Scaffolder):
         document = f"type: {request.type_name}\n\n{STARTER_ATTRIBUTES}"
         # `append` (`dg scaffold defs --append`) was added to ScaffoldRequest after 1.11.
         if getattr(request, "append", False):
+            existing = request.target_path.read_text(encoding="utf-8")
+            # Start `---` on its own line even if the file doesn't end with a newline.
+            separator = "\n---\n" if existing and not existing.endswith("\n") else "---\n"
             with request.target_path.open("a", encoding="utf-8") as f:
-                f.write(f"---\n{document}")
+                f.write(f"{separator}{document}")
         else:
             (request.target_path / "defs.yaml").write_text(document, encoding="utf-8")
