@@ -61,7 +61,6 @@ def test_pagination_default_limit(respx_mock: respx.MockRouter, fme_resource: FM
     assert route.calls[0].request.url.params["offset"] == "0"
 
 
-@pytest.mark.xfail(strict=True, reason="BUG-4: pagination makes one extra empty request")
 def test_pagination_stops_without_extra_request(
     respx_mock: respx.MockRouter, fme_resource: FMEResource
 ) -> None:

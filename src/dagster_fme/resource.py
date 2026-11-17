@@ -91,12 +91,12 @@ class FMEResource(dg.ConfigurableResource):
 
                 yield response
 
-                # BUG-4: stops on the response offset, so always makes one extra request.
-                j = response.json()
-                response_tc = int(j.get("totalCount", 0))
-                response_o = int(j.get("offset", 0))
+                body = response.json()
+                items = body.get("items") or []
+                total_count = int(body.get("totalCount", 0))
+                page_offset = int(body.get("offset", offset))
+
+                if not items or page_offset + len(items) >= total_count:
+                    break
 
                 offset += limit
-
-                if response_o >= response_tc:
-                    break
