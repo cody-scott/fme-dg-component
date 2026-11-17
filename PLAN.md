@@ -1,6 +1,6 @@
 # PLAN.md: Rebuild `fme/` into the `dagster-fme` uv package
 
-Status: **in progress** (Phases 0–6 done and merged, Phase 7 in review. Phases 7–10 come from the code review in
+Status: **in progress** (Phases 0–6 done and merged, Phase 7 merged, Phase 8 in progress. Phases 7–10 come from the code review in
 [`docs/SPEC.md`](docs/SPEC.md); Phases 9 and 10 wait on user decisions). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
 
 ## Goal

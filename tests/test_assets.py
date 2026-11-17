@@ -91,3 +91,16 @@ def test_job_asset_name_override() -> None:
     assert FMEWorkspace("alpha.fmw", job_asset_name="job").job_asset_spec.key == dg.AssetKey(
         ["fme", "job"]
     )
+
+
+@pytest.mark.xfail(strict=True, reason="N-1: description in asset_spec_kwargs raises TypeError")
+def test_asset_spec_kwargs_description_overrides_default() -> None:
+    ws = build_fme_assets(
+        "alpha.fmw", asset_list=["t"], asset_spec_kwargs={"description": "Custom."}
+    )
+    assert [s.description for s in ws.asset_specs] == ["Custom.", "Custom."]
+
+
+def test_job_asset_has_default_description() -> None:
+    spec = build_fme_assets("alpha.fmw", asset_spec_kwargs={"group_name": "g"}).job_asset_spec
+    assert spec.description == "The asset that represents the FME workspace `alpha.fmw`."
