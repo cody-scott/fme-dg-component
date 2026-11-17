@@ -1,6 +1,7 @@
 # PLAN.md: Rebuild `fme/` into the `dagster-fme` uv package
 
-Status: **in progress** (Phases 0–5 done, Phase 6 awaiting review). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
+Status: **in progress** (Phases 0–6 done and merged. Phases 7–10 come from the code review in
+[`docs/SPEC.md`](docs/SPEC.md); Phases 9 and 10 wait on user decisions). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
 
 ## Goal
 
@@ -207,7 +208,7 @@ Do one bug per commit. In each commit, remove that bug's xfail marker so it beco
 - [x] Delete the original `fme/` directory.
 - [x] Final gate: `uv run pre-commit run --all-files`, pytest coverage of at least 90%, and the lowest-direct job passes.
 - [x] Commit: `Phase 6: docs, remove legacy fme module`.
-- [ ] Ask the user before pushing the `phase-6/...` branch or opening its PR.
+- [x] Ask the user before pushing the `phase-6/...` branch or opening its PR. (Merged as PR #8.)
 - [x] Notes from Phase 6:
   - When Dagster derives the YAML model for a `Resolvable` component, it overwrites
     `Field(description=...)` with the resolver's description (None) on every field that has a default.
@@ -216,6 +217,101 @@ Do one bug per commit. In each commit, remove that bug's xfail marker so it beco
     `Field(description=...)` works there. A test checks that every YAML field has a description.
   - Closed the Phase 4 follow-up: `FMEResource.api_key` is `repr=False`.
   - Removed the `fme/` excludes from ruff config and pre-commit along with the directory.
+
+---
+
+## Review follow-up (Phases 7–10)
+
+These phases fix what the review in [`docs/SPEC.md`](docs/SPEC.md) found. IDs `R*` are simplifications
+and `N*` are bugs, risks or gaps, both defined there. Each phase gets its own `phase-<n>/<slug>` branch and PR,
+as usual. Phases 7 and 8 change no public contract. Phases 9 and 10 change behaviour or the YAML schema, so
+**don't start them until the user has answered the decisions listed in each one**.
+
+### Phase 7: Simplify the sensor and resource (no contract change)
+
+Branch: `phase-7/simplify`. Make one commit per item or small group. Every commit must keep the existing sensor,
+component and resource tests green without editing what they assert. Delete tests only when they target a removed
+private helper.
+
+- [ ] **R1**: delete `LatestJob` and `get_latest_time_for_responses`. Pass the resource's `{workspace: job}` straight
+      to `evaluate_jobs`, which parses `timeFinished` itself. Delete or port the tests that call the removed function
+      (`get_latest_time_for_responses` cases that still describe reachable behaviour move to `JobScan` tests).
+- [ ] **R2**: replace `parse_cursor` and `cursor_times` with `load_cursor(raw) -> dict[str, datetime]` and
+      `dump_cursor(cursor) -> str`. `evaluate_jobs` works in datetimes and loops over the configured workspaces
+      (sketch in `docs/SPEC.md`). The JSON written to the cursor must stay byte-compatible: add a test that
+      round-trips a cursor written by the current code.
+- [ ] **R4**: `request_offset_paginated` yields each page's `items` list instead of the `httpx.Response`, so each page
+      is decoded once. Inline `get_request`. Drop the caller overrides for `limit` and `offset`. Use
+      `contextlib.closing` in `get_latest_successful_jobs`. Keep the respx assertions on params and call count.
+- [ ] **R5**: `FMEComponent.build_resource` passes `page_size`/`max_pages` only when set, so defaults live only on
+      `FMEResource`.
+- [ ] **R6**: add `DEFAULT_KEY_PREFIX = ("fme",)` in `assets.py` and use it in `FMEWorkspace`, `build_fme_assets` and
+      `FMEWorkspaceSpec`.
+- [ ] **R7**: move `FMEComponent`'s validators below all field declarations.
+- [ ] **R8**: make the job asset description a one-line f-string. Check the existing description test (if any) and
+      update the expected text.
+- [ ] Gate: lint, format check, pyright, pytest with coverage ≥ 90%, and `lowest-direct`. Record the refactor in
+      `CHANGELOG.md` under *Unreleased* (internal change, no user impact).
+
+### Phase 8: Fix the low-risk bugs
+
+Branch: `phase-8/fix-review-bugs`. Each bug lands as an `xfail(strict=True, reason="N-n: ...")` test first, then the
+fix commit removes the marker, as in Phase 3.
+
+- [ ] **N-1**: `asset_spec_kwargs={"description": ...}` must not raise. The caller's description wins over the
+      default. Test both the override and the default.
+- [ ] **N-5**: `FMEComponent` also rejects workspaces whose **cleaned** names collide (e.g. `a.b` and `a-b`), naming
+      both raw workspaces in the error.
+- [ ] **N-8**: `load_cursor` treats a timestamp with no timezone as UTC. Test a hand-written naive cursor value.
+- [ ] **N-9**: scaffolder append mode writes a newline before `---` when the existing file doesn't end with one.
+      Test with a file that has no trailing newline (skipped at the 1.11 floor, like the existing append test).
+- [ ] Record each fix in `CHANGELOG.md` under *Unreleased*.
+
+### Phase 9: Make the job scan robust on busy servers (needs user decisions)
+
+Branch: `phase-9/scan-robustness`. Both risks come from the single newest-first scan reading up to
+`page_size × max_pages` jobs (20,000 at the defaults).
+
+Decisions to get from the user before starting:
+
+1. **N-3** (a workspace with no cursor that is never found makes every tick scan to `max_pages`). Options:
+   a. When a full scan ends without finding a first-sight workspace, record the newest `timeFinished` seen as its
+      baseline. Its next real job then emits an event. This is a behaviour change, so pin it with a test and note it
+      in `CHANGELOG.md`.
+   b. Keep the behaviour, but log the warning only once per process and say in the README that misspelled names cost
+      a full scan per tick.
+2. **N-4** (a workspace with a cursor that hasn't run in more than the cap raises every tick and blocks every other
+   workspace). Options:
+   a. Don't raise. Emit events for resolved workspaces, keep the stuck workspace's cursor, and log an error naming it.
+      Risk: a newer job beyond the cap is missed until the cap is raised.
+   b. Add an optional `repository` to `FMEWorkspaceSpec`. Workspaces that set it use strategy 1 (`repository` +
+      `workspace` filter, `limit=1`, one request each). Workspaces without it keep strategy 2. Doesn't fix N-4 for
+      workspaces with no repository.
+   c. Both a and b.
+
+Tasks once decided:
+
+- [ ] Implement the chosen N-3 option in `JobScan` / `get_latest_successful_jobs`, keeping the decision logic pure.
+- [ ] Implement the chosen N-4 option. If `repository` is added, it's a YAML schema addition: optional field, default
+      `None`, documented with `Field(description=...)`, and covered by a component YAML test.
+- [ ] respx tests for each new path, asserting on params and call count.
+- [ ] README: update "how the cursor and baseline work" and the job fetching description.
+- [ ] `CHANGELOG.md` entries for every behaviour change.
+
+### Phase 10: Close the YAML gaps and tidy `FMEWorkspace` (needs user approval)
+
+Branch: `phase-10/yaml-gaps`. Each item changes a public contract, so the user approves each one separately.
+
+- [ ] **R3 / N-2** (Python API): make `FMEWorkspace` a frozen dataclass holding `workspace` and `specs`, built only by
+      `build_fme_assets`. Remove `fqn` and the custom `__repr__`. This fixes N-2 (direct construction gives keys with
+      no workspace segment). Breaking for anyone constructing `FMEWorkspace` directly or reading `.fqn`, so note it in
+      `CHANGELOG.md`. If the user prefers no break, fix N-2 alone by adding the cleaned name inside the constructor.
+- [ ] **N-6** (YAML schema): add an optional `asset_attributes` mapping to `FMEWorkspaceSpec` (e.g. `group_name`,
+      `owners`, `tags`), passed through as `asset_spec_kwargs`. Decide with the user which keys to allow and whether
+      `key` and `description` are rejected. Test that it reaches every spec through the YAML path.
+- [ ] **N-7** (YAML schema): add optional `timeout` and `api_path` to `FMEComponent`, valid only with `host` and
+      `api_key`, like `page_size`. Or, if the user prefers, document the external resource as the way to set them.
+- [ ] Update the scaffolder template and README for any new fields, and add `CHANGELOG.md` entries.
 
 ---
 
@@ -248,3 +344,6 @@ Agents: put findings here and don't silently guess.
   - Testing helper: settled, see the Phase 2 notes.
   - Env templating: `{{ env('VAR') }}` (raises if unset) and `{{ env.VAR }}` (gives `None` if unset) work on both
     1.11.0 and 1.13. Use the function form.
+- [ ] Does FME Flow always return `timeFinished` in UTC? The v4 spec only says `date-time`. (Raised again by the
+      review: affects N-8 and how cursor values compare.)
+- [ ] Review decisions (from `docs/SPEC.md`): N-3 option, N-4 option, approval for R3, N-6 and N-7. See Phases 9 and 10.
