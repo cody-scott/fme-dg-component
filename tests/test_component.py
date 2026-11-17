@@ -79,7 +79,6 @@ def test_duplicate_workspaces_are_rejected(load_component_defs: Loader) -> None:
     assert re.search(r"Duplicate workspace\(s\) in fme_asset_specs: alpha\.fmw", _chain(exc.value))
 
 
-@pytest.mark.xfail(strict=True, reason="N-5: cleaned-name collisions aren't rejected clearly")
 def test_workspaces_with_colliding_cleaned_names_are_rejected(load_component_defs: Loader) -> None:
     with pytest.raises(Exception) as exc:
         load_component_defs(
@@ -92,10 +91,23 @@ def test_workspaces_with_colliding_cleaned_names_are_rejected(load_component_def
             """
         )
     message = _chain(exc.value)
-    assert "same asset key name" in message
-    assert "a.b" in message
-    assert "a-b" in message
-    assert "a__b" in message
+    assert "clean to the same asset key name: a.b, a-b -> fme/a__b" in message
+
+
+def test_colliding_cleaned_names_with_different_prefixes_are_allowed(
+    load_component_defs: Loader,
+) -> None:
+    defs = load_component_defs(
+        """
+        type: dagster_fme.FMEComponent
+        attributes:
+          fme_asset_specs:
+            - workspace: a.b
+            - workspace: a-b
+              key_prefix: [other]
+        """
+    )
+    assert _asset_keys(defs) == {"fme/a__b/workspace__fmw", "other/a__b/workspace__fmw"}
 
 
 def test_default_key_prefix_matches_builder(load_component_defs: Loader) -> None:

@@ -9,6 +9,9 @@ All notable changes to `dagster-fme` are recorded here. The format follows
 
 - N-1: passing `description` in `asset_spec_kwargs` no longer raises `TypeError` on the job
   asset. The caller's description now replaces the default one.
+- N-5: `FMEComponent` rejects distinct workspaces whose cleaned names give the same asset keys
+  (e.g. `a.b` and `a-b` under the same `key_prefix`). The error names both raw workspaces and
+  the shared key, instead of Dagster's later duplicate-key error.
 
 ### Changed
 

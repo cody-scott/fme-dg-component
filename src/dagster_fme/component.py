@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from typing import Annotated, Any
 
 import dagster as dg
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from dagster_fme.assets import DEFAULT_JOB_ASSET_NAME, DEFAULT_KEY_PREFIX, build_fme_assets
+from dagster_fme.assets import (
+    DEFAULT_JOB_ASSET_NAME,
+    DEFAULT_KEY_PREFIX,
+    FMEWorkspace,
+    build_fme_assets,
+)
 from dagster_fme.resource import DEFAULT_MAX_PAGES, DEFAULT_PAGE_SIZE, FMEResource
 from dagster_fme.scaffolder import FMEComponentScaffolder
 from dagster_fme.sensor import build_fme_sensor
@@ -126,6 +131,26 @@ class FMEComponent(dg.Component, dg.Model, dg.Resolvable):
             raise ValueError(
                 f"Duplicate workspace(s) in fme_asset_specs: {', '.join(duplicates)}. "
                 "Each FME workspace may appear only once."
+            )
+        return specs
+
+    @field_validator("fme_asset_specs")
+    @classmethod
+    def _cleaned_names_are_unique(cls, specs: list[FMEWorkspaceSpec]) -> list[FMEWorkspaceSpec]:
+        """Reject distinct workspaces whose cleaned names give them the same asset keys."""
+        groups: defaultdict[tuple[tuple[str, ...], str], list[str]] = defaultdict(list)
+        for spec in specs:
+            clean = FMEWorkspace.clean_workspace(spec.workspace)
+            groups[(tuple(spec.key_prefix), clean)].append(spec.workspace)
+        collisions = [
+            f"{', '.join(names)} -> {'/'.join([*prefix, clean])}"
+            for (prefix, clean), names in groups.items()
+            if len(names) > 1
+        ]
+        if collisions:
+            raise ValueError(
+                "Workspaces in fme_asset_specs clean to the same asset key name: "
+                f"{'; '.join(collisions)}. Rename a workspace or give it a different key_prefix."
             )
         return specs
 
