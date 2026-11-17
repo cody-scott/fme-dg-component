@@ -93,7 +93,6 @@ def test_job_asset_name_override() -> None:
     )
 
 
-@pytest.mark.xfail(strict=True, reason="N-1: description in asset_spec_kwargs raises TypeError")
 def test_asset_spec_kwargs_description_overrides_default() -> None:
     ws = build_fme_assets(
         "alpha.fmw", asset_list=["t"], asset_spec_kwargs={"description": "Custom."}

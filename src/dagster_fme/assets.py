@@ -90,9 +90,10 @@ class FMEWorkspace:
     def job_asset_spec(self) -> dg.AssetSpec:
         """The spec for the asset that represents the workspace itself."""
         key = [*self._key_prefix, self._job_asset_name]
-        spec_args: dict[str, Any] = self._asset_spec_kwargs | {"key": key}
         desc = f"The asset that represents the FME workspace `{self._workspace}`."
-        return dg.AssetSpec(**spec_args, description=desc)
+        # A caller-supplied description wins over the default one.
+        spec_args: dict[str, Any] = {"description": desc} | self._asset_spec_kwargs | {"key": key}
+        return dg.AssetSpec(**spec_args)
 
     @property
     def asset_specs(self) -> list[dg.AssetSpec]:

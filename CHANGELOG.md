@@ -5,6 +5,11 @@ All notable changes to `dagster-fme` are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- N-1: passing `description` in `asset_spec_kwargs` no longer raises `TypeError` on the job
+  asset. The caller's description now replaces the default one.
+
 ### Changed
 
 - Internal simplification of the sensor and resource (Phase 7, review items R1, R2 and R4 to R8).
