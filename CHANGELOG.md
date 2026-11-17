@@ -31,3 +31,6 @@ monorepo. The entries below are changes from that module's behaviour.
 - **BUG-2 (breaking)**: The `FMEWorkspaceSpec.key_prefix` default is now `["fme"]`, the same as
   `build_fme_assets`. It was `["FME"]`. YAML configs that relied on the default get asset keys
   under `fme/...` instead of `FME/...`. To keep the old keys, set `key_prefix: [FME]`.
+- **BUG-8**: `FMEComponent` rejects `fme_asset_specs` entries that repeat a `workspace`, and the
+  error names the duplicates. Before, a later spec silently replaced an earlier one in the
+  sensor's lookup.
