@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Annotated
+from typing import Annotated, Any
 
 import dagster as dg
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from dagster_fme.assets import DEFAULT_JOB_ASSET_NAME, build_fme_assets
+from dagster_fme.assets import DEFAULT_JOB_ASSET_NAME, DEFAULT_KEY_PREFIX, build_fme_assets
 from dagster_fme.resource import DEFAULT_MAX_PAGES, DEFAULT_PAGE_SIZE, FMEResource
 from dagster_fme.scaffolder import FMEComponentScaffolder
 from dagster_fme.sensor import build_fme_sensor
@@ -24,7 +24,7 @@ class FMEWorkspaceSpec(dg.Model):
         )
     )
     key_prefix: list[str] = Field(
-        default_factory=lambda: ["fme"],
+        default_factory=lambda: list(DEFAULT_KEY_PREFIX),
         description="Leading asset key components. Assets are keyed under "
         "key_prefix + [<cleaned workspace>].",
     )
@@ -110,6 +110,12 @@ class FMEComponent(dg.Component, dg.Model, dg.Resolvable):
         _doc("The FME workspaces to represent. Each workspace may appear only once."),
     ]
 
+    build_sensor: Annotated[
+        bool, _doc("Whether to build the sensor that materializes assets from successful jobs.")
+    ] = True
+    sensor_name: Annotated[str, _doc("Name of the sensor.")] = "fme_sensor"
+    sensor_check_minutes: Annotated[int, _doc("Minimum minutes between sensor ticks.")] = 30
+
     @field_validator("fme_asset_specs")
     @classmethod
     def _workspaces_are_unique(cls, specs: list[FMEWorkspaceSpec]) -> list[FMEWorkspaceSpec]:
@@ -122,12 +128,6 @@ class FMEComponent(dg.Component, dg.Model, dg.Resolvable):
                 "Each FME workspace may appear only once."
             )
         return specs
-
-    build_sensor: Annotated[
-        bool, _doc("Whether to build the sensor that materializes assets from successful jobs.")
-    ] = True
-    sensor_name: Annotated[str, _doc("Name of the sensor.")] = "fme_sensor"
-    sensor_check_minutes: Annotated[int, _doc("Minimum minutes between sensor ticks.")] = 30
 
     @model_validator(mode="after")
     def _resource_settings_are_consistent(self) -> FMEComponent:
@@ -148,12 +148,12 @@ class FMEComponent(dg.Component, dg.Model, dg.Resolvable):
         """The ``FMEResource`` this component defines, or None to use an external one."""
         if self.host is None or self.api_key is None:
             return None
-        return FMEResource(
-            host=self.host,
-            api_key=self.api_key,
-            page_size=self.page_size if self.page_size is not None else DEFAULT_PAGE_SIZE,
-            max_pages=self.max_pages if self.max_pages is not None else DEFAULT_MAX_PAGES,
-        )
+        tuning: dict[str, Any] = {
+            name: value
+            for name, value in (("page_size", self.page_size), ("max_pages", self.max_pages))
+            if value is not None
+        }
+        return FMEResource(host=self.host, api_key=self.api_key, **tuning)
 
     def build_defs(self, context: dg.ComponentLoadContext) -> dg.Definitions:
         """Build the component's definitions.

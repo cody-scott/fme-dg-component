@@ -13,11 +13,12 @@ import respx
 
 import dagster_fme.sensor as sensor_module
 from dagster_fme import FMEResource, FMEWorkspace, build_fme_assets, build_fme_sensor
+from dagster_fme.resource import JobScan
 from dagster_fme.sensor import (
     build_materialization_metadata,
+    dump_cursor,
     evaluate_jobs,
-    get_latest_time_for_responses,
-    parse_cursor,
+    load_cursor,
 )
 from tests.helpers import JOBS_URL, jobs_responder, load_fixture
 
@@ -26,6 +27,17 @@ UTC = datetime.timezone.utc
 
 def _items(name: str) -> list[dict[str, Any]]:
     return load_fixture(name)["items"]
+
+
+def _latest(name: str) -> dict[str, dict[str, Any]]:
+    """The latest job per workspace in a fixture, as the resource returns it."""
+    scan = JobScan(targets=frozenset(j["workspace"] for j in _items(name)), since={})
+    scan.add_page(_items(name))
+    return scan.found
+
+
+def _dt(value: str) -> datetime.datetime:
+    return datetime.datetime.fromisoformat(value)
 
 
 def _workspaces() -> list[FMEWorkspace]:
@@ -49,65 +61,54 @@ def _run_sensor(
     )
     result = sensor(context)
     assert isinstance(result, dg.SensorResult)
-    return result, parse_cursor(result.cursor)
+    assert result.cursor is not None
+    return result, json.loads(result.cursor)
 
 
 # --- pure helpers ---------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("raw", [None, ""])
-def test_parse_cursor_empty(raw: str | None) -> None:
-    assert parse_cursor(raw) == {}
+def test_load_cursor_empty(raw: str | None) -> None:
+    assert load_cursor(raw) == {}
 
 
-def test_parse_cursor_json() -> None:
-    assert parse_cursor('{"a": "2026-01-01T00:00:00+00:00"}') == {"a": "2026-01-01T00:00:00+00:00"}
+def test_load_cursor_json() -> None:
+    assert load_cursor('{"a": "2026-01-01T00:00:00+00:00"}') == {
+        "a": datetime.datetime(2026, 1, 1, tzinfo=UTC)
+    }
 
 
-def test_latest_time_picks_latest_per_workspace_across_timezones() -> None:
-    latest = get_latest_time_for_responses(_items("jobs_multiple_runs.json"))
-
-    # 09:30-05:00 is 14:30Z, later than 12:15Z.
-    assert latest["alpha.fmw"]["id"] == 302
-    assert latest["alpha.fmw"]["time_finished"] == datetime.datetime(2026, 1, 4, 14, 30, tzinfo=UTC)
-    # 07:20+02:00 is 05:20Z, later than 23:30Z the day before.
-    assert latest["Beta Load.fmw"]["id"] == 304
-    assert latest["Beta Load.fmw"]["time_finished"].utcoffset() == datetime.timedelta(hours=2)
-    assert latest["Beta Load.fmw"]["data"]["repository"] == "Samples"
-
-
-def test_latest_time_parses_z_suffix() -> None:
-    latest = get_latest_time_for_responses(_items("jobs_page_1.json"))
-    assert latest["alpha.fmw"]["time_finished"] == datetime.datetime(2026, 1, 2, 10, 5, tzinfo=UTC)
-
-
-@pytest.mark.parametrize(
-    ("fixture", "match"),
-    [
-        ("job_missing_workspace.json", "Workspace"),
-        ("job_missing_time_finished.json", "Time finished"),
-    ],
-)
-def test_latest_time_raises_on_missing_fields(fixture: str, match: str) -> None:
-    with pytest.raises(ValueError, match=match):
-        get_latest_time_for_responses(_items(fixture))
+def test_cursor_round_trips_byte_for_byte() -> None:
+    # Written by the pre-Phase-7 sensor: json.dumps of isoformat() strings.
+    written = json.dumps(
+        {
+            "alpha.fmw": "2026-01-04T09:30:00-05:00",
+            "Beta Load.fmw": "2026-01-02T11:01:00.250000+00:00",
+        }
+    )
+    assert dump_cursor(load_cursor(written)) == written
 
 
 def test_evaluate_carries_forward_configured_and_drops_unconfigured() -> None:
-    prior = {"alpha.fmw": "2026-01-01T00:00:00+00:00", "removed.fmw": "2026-01-01T00:00:00+00:00"}
+    prior = {
+        "alpha.fmw": _dt("2026-01-01T00:00:00+00:00"),
+        "removed.fmw": _dt("2026-01-01T00:00:00+00:00"),
+    }
     events, cursor = evaluate_jobs(prior, {}, _workspaces())
     assert events == []
-    assert cursor == {"alpha.fmw": "2026-01-01T00:00:00+00:00"}
+    assert cursor == {"alpha.fmw": _dt("2026-01-01T00:00:00+00:00")}
 
 
 def test_evaluate_first_sight_is_baseline_only() -> None:
-    latest = get_latest_time_for_responses(_items("jobs_page_1.json"))
-    events, cursor = evaluate_jobs({}, latest, _workspaces())
+    events, cursor = evaluate_jobs({}, _latest("jobs_page_1.json"), _workspaces())
     assert events == []
-    assert cursor == {
-        "alpha.fmw": "2026-01-02T10:05:00+00:00",
-        "Beta Load.fmw": "2026-01-02T11:01:00+00:00",
-    }
+    assert dump_cursor(cursor) == json.dumps(
+        {
+            "alpha.fmw": "2026-01-02T10:05:00+00:00",
+            "Beta Load.fmw": "2026-01-02T11:01:00+00:00",
+        }
+    )
 
 
 # --- sensor ---------------------------------------------------------------------------
@@ -165,7 +166,7 @@ def test_sensor_ignores_unconfigured_workspaces(
     result = sensor(context)
     assert isinstance(result, dg.SensorResult)
     assert result.asset_events == []
-    assert "gamma-export.fmw" not in parse_cursor(result.cursor)
+    assert "gamma-export.fmw" not in load_cursor(result.cursor)
 
 
 def test_sensor_definition_settings() -> None:
@@ -192,9 +193,10 @@ def test_sensor_carries_forward_unseen_workspaces(
 
 
 def test_materialization_metadata_is_typed() -> None:
-    latest = get_latest_time_for_responses(_items("jobs_page_1.json"))
     events, _ = evaluate_jobs(
-        {"alpha.fmw": "2026-01-01T00:00:00+00:00"}, latest, [build_fme_assets("alpha.fmw")]
+        {"alpha.fmw": _dt("2026-01-01T00:00:00+00:00")},
+        _latest("jobs_page_1.json"),
+        [build_fme_assets("alpha.fmw")],
     )
     md = events[0].metadata
     assert md["fme_job_id"] == dg.MetadataValue.int(101)

@@ -3,6 +3,20 @@
 All notable changes to `dagster-fme` are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- Internal simplification of the sensor and resource (Phase 7, review items R1, R2 and R4 to R8).
+  YAML, asset keys and the cursor format are unchanged: a test checks that a cursor written
+  by the earlier code round-trips byte for byte. The private helpers `LatestJob`,
+  `get_latest_time_for_responses`, `parse_cursor`, `cursor_times` and
+  `FMEResource.get_request` are gone. `evaluate_jobs` now takes and returns datetime cursors
+  (`load_cursor`/`dump_cursor` convert). `FMEResource.request_offset_paginated` yields each
+  page's `items` list and no longer accepts `limit`/`offset` overrides.
+- The job asset description is now one line: ``The asset that represents the FME workspace
+  `<name>`.``
+
 ## [0.1.0] - Unreleased
 
 First release as a standalone package, ported from the `fme/` module of the `snowflake_analytics`
