@@ -1,6 +1,6 @@
 # PLAN.md: Rebuild `fme/` into the `dagster-fme` uv package
 
-Status: **in progress** (Phases 0–1 done). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
+Status: **in progress** (Phases 0–2 done). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
 
 ## Goal
 
@@ -75,30 +75,39 @@ Pin this with a test.
 
 This phase only moves and decouples the code. It doesn't fix bugs, except where decoupling forces a change.
 
-- [ ] `resource.py`: `FMEResource(dg.ConfigurableResource)` with `host: str`, `api_key: str`,
+- [x] `resource.py`: `FMEResource(dg.ConfigurableResource)` with `host: str`, `api_key: str`,
       `api_path: str = "/fmeapiv4"`, and `timeout: float`. Implement `get_request` and `request_offset_paginated`
       using `httpx.Client`: auth header `Authorization: fmetoken token=<key>`, `raise_for_status()`.
       Normalise any trailing slash on `host`.
-- [ ] `assets.py`: port `FMEAsset` to `FMEWorkspace` and port `build_fme_assets`. Fix the imports.
-- [ ] `sensor.py`: port `build_asset_sensor` to `build_fme_sensor`, plus `get_fme_data` and
+- [x] `assets.py`: port `FMEAsset` to `FMEWorkspace` and port `build_fme_assets`. Fix the imports.
+- [x] `sensor.py`: port `build_asset_sensor` to `build_fme_sensor`, plus `get_fme_data` and
       `get_latest_time_for_responses`. Split out pure helpers.
-- [ ] `component.py`: port `FME` to `FMEComponent` and `FMEAssetSpec` to `FMEWorkspaceSpec`. Use the new imports.
-- [ ] `__init__.py`: export `FMEResource`, `FMEWorkspace`, `build_fme_assets`, `build_fme_sensor`,
-      `FMEComponent`, and `FMEWorkspaceSpec`. Consider back-compat aliases `FME` and `FMEAssetSpec` if callers in the monorepo use the old names. Ask the user.
-- [ ] Fixtures: `tests/fixtures/jobs_page_1.json`, `jobs_page_2.json`, `jobs_empty.json`, `job_missing_workspace.json`,
+- [x] `component.py`: port `FME` to `FMEComponent` and `FMEAssetSpec` to `FMEWorkspaceSpec`. Use the new imports.
+- [x] `__init__.py`: export `FMEResource`, `FMEWorkspace`, `build_fme_assets`, `build_fme_sensor`,
+      `FMEComponent`, and `FMEWorkspaceSpec`. No back-compat aliases (user decision).
+- [x] Fixtures: `tests/fixtures/jobs_page_1.json`, `jobs_page_2.json`, `jobs_empty.json`, `job_missing_workspace.json`,
       `job_missing_time_finished.json`, and a fixture with multiple runs of the same workspace.
-- [ ] Tests that pin current, correct behaviour (these pass):
-  - [ ] `clean_workspace` on spaces, dots, dashes, unicode and already-clean names.
-  - [ ] Asset key shapes for the job asset and child assets, and `include_job_asset=False`.
-  - [ ] `asset_spec_kwargs` reaches every spec (e.g. `group_name`, `owners`).
-  - [ ] Pagination sends the auth header and correct `limit`/`offset`, and yields every page.
-  - [ ] `get_latest_time_for_responses`: picks the latest per workspace, handles `Z` and offset timezones, and raises on a missing workspace or `timeFinished`.
-  - [ ] Sensor: first sight sets a baseline with no events, a newer finish emits events for every spec, and an equal or older finish emits nothing.
-  - [ ] Sensor ignores workspaces that aren't configured.
-  - [ ] Component loads from YAML and builds the expected asset keys and one sensor with the configured name and interval.
-- [ ] `xfail(strict=True)` tests that describe the **corrected** behaviour for BUG-1, 2, 3, 4, 7, 8 and 9.
-- [ ] Gate: the suite is green (passing tests plus expected xfails), and lint and pyright are clean.
-- [ ] Commit: `Phase 2: port fme module into dagster_fme with characterization tests`.
+- [x] Tests that pin current, correct behaviour (these pass):
+  - [x] `clean_workspace` on spaces, dots, dashes, unicode and already-clean names.
+  - [x] Asset key shapes for the job asset and child assets, and `include_job_asset=False`.
+  - [x] `asset_spec_kwargs` reaches every spec (e.g. `group_name`, `owners`).
+  - [x] Pagination sends the auth header and correct `limit`/`offset`, and yields every page.
+  - [x] `get_latest_time_for_responses`: picks the latest per workspace, handles `Z` and offset timezones, and raises on a missing workspace or `timeFinished`.
+  - [x] Sensor: first sight sets a baseline with no events, a newer finish emits events for every spec, and an equal or older finish emits nothing.
+  - [x] Sensor ignores workspaces that aren't configured.
+  - [x] Component loads from YAML and builds the expected asset keys and one sensor with the configured name and interval.
+- [x] `xfail(strict=True)` tests that describe the **corrected** behaviour for BUG-1, 2, 3, 4, 7, 8 and 9.
+- [x] Gate: the suite is green (passing tests plus expected xfails), and lint and pyright are clean.
+- [x] Notes from the port:
+  - `FMEResource.timeout` defaults to `30.0` (user decision). `api_host` was renamed to `api_path`.
+  - The sensor closure takes `**_resources`, because Dagster's direct `sensor(context)` invocation passes every
+    `required_resource_keys` entry as a kwarg. The legacy closure couldn't be invoked directly, but daemon ticks were unaffected.
+  - BUG-3 can't fail today, because Dagster turns a raw nested dict into `JsonMetadataValue`. Its xfail asserts the target typed keys.
+  - Component tests build a throwaway dg project and call `dg.load_from_defs_folder(project_root=...)`. That's the only
+    helper common to 1.11 and 1.13: `create_defs_folder_sandbox` and `ComponentLoadContext.for_test` each exist in only one.
+  - Verified at the floor: `uv sync --resolution lowest-direct` (dagster 1.11.0, httpx 0.27.0) passes. That command
+    rewrites `uv.lock`, so run `git checkout uv.lock && uv sync --locked` afterwards.
+- [x] Commit: `Phase 2: port fme module into dagster_fme with characterization tests`.
 
 ## Phase 3: Fix the bugs
 
@@ -169,9 +178,24 @@ Do one bug per commit. In each commit, remove that bug's xfail marker so it beco
 
 Agents: put findings here and don't silently guess.
 
-- [ ] FME Flow v4 `/jobs`: which filter and sort params exist? What are the exact field names (`workspace`,
+- [x] FME Flow v4 `/jobs`: which filter and sort params exist? What are the exact field names (`workspace`,
       `repository`, `timeFinished`, `timeStarted`, `status`, `id`)? Is `timeFinished` always UTC with `Z`?
+  - Source: the OpenAPI 3.0 spec behind the v4 docs, `https://docs.safe.com/fme/html/fmeapiv4/docs/schema/static.json`
+    (read 2026-11-17).
+  - Response `JobPage`: `items`, `totalCount`, `limit`, `offset`. Each item is a `JobSummaryResponse` with `id` (int64),
+    `workspace`, `repository`, `status`, `timeQueued`/`timeStarted`/`timeFinished` (`format: date-time`), `elapsedTime`
+    (ms), `cpuTime`, `engineName`, `sourceType`, `warningCount`, `errorCount` and more. No field is marked required.
+  - `status` values: `queued`, `running`, `success`, `failure`, `cancelled`. The `status` query param is an array
+    ("jobs matching any of the specified statuses").
+  - Filters: `status`, `repository`, `workspace` ("if specified **along with repository**"), `runtimeUserID`,
+    `engineName`, `sourceType`, `sourceID`, `queue`. There's no date-range filter.
+  - `sort`: `<field>_asc|_desc` on `workspace`, `timeFinished`, `timeStarted` or `status`. The default is `timeFinished`
+    descending. `limit` is 0–1000 (default 100), `offset` is ≥0.
+  - Still open: the spec only says `date-time` and doesn't state a timezone, so the parser keeps accepting `Z` and offsets.
+  - Implication for Phase 4: strategy 1 (per-workspace `limit=1`) needs the **repository** as well as the workspace,
+    which the spec doesn't currently carry. Strategy 2 (default sort `timeFinished_desc`, early stop) needs nothing new.
 - [ ] Are workspace names unique across FME repositories? If not, should matching use `repository/workspace`?
       Ask the user before changing the match key, because it changes the cursor format.
-- [ ] Do the monorepo callers need back-compat aliases (`FME`, `FMEAssetSpec`, `build_asset_sensor`)?
+- [x] Do the monorepo callers need back-compat aliases (`FME`, `FMEAssetSpec`, `build_asset_sensor`)? No (user decision).
 - [ ] What is the exact env-templating syntax and component-testing helper for the Dagster floor (1.11) compared with the latest?
+  - Testing helper: settled, see the Phase 2 notes. Env templating is still to check in Phase 4.
