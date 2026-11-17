@@ -1,6 +1,6 @@
 # PLAN.md: Rebuild `fme/` into the `dagster-fme` uv package
 
-Status: **in progress** (Phases 0–4 done). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
+Status: **in progress** (Phases 0–5 done). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
 
 ## Goal
 
@@ -175,15 +175,28 @@ Do one bug per commit. In each commit, remove that bug's xfail marker so it beco
 
 ## Phase 5: dg CLI integration
 
-- [ ] Add the registry entry point in `pyproject.toml`. Check the exact group name for `dagster>=1.11`
+- [x] Add the registry entry point in `pyproject.toml`. Check the exact group name for `dagster>=1.11`
       (expected: `[project.entry-points."dagster_dg_cli.registry_modules"] dagster_fme = "dagster_fme"`).
-- [ ] `scaffolder.py`: a `dg.Scaffolder` subclass attached with `@dg.scaffold_with(...)` on `FMEComponent`. It writes a
+- [x] `scaffolder.py`: a `dg.Scaffolder` subclass attached with `@dg.scaffold_with(...)` on `FMEComponent`. It writes a
       `defs.yaml` with one example workspace, a commented-out `host`/`api_key` env template, and the sensor settings.
-- [ ] Test: entry-point metadata resolves to `dagster_fme` (via `importlib.metadata`).
-- [ ] Test: run the scaffolder into a `tmp_path`. The generated `defs.yaml` must parse and load into
+- [x] Test: entry-point metadata resolves to `dagster_fme` (via `importlib.metadata`).
+- [x] Test: run the scaffolder into a `tmp_path`. The generated `defs.yaml` must parse and load into
       `Definitions` without errors.
-- [ ] Manual smoke check, recorded in the PR description: in a throwaway dg project, `uv add --editable <path>`,
+- [x] Manual smoke check, recorded in the PR description: in a throwaway dg project, `uv add --editable <path>`,
       then `dg list components` shows `dagster_fme.FMEComponent` and `dg scaffold defs dagster_fme.FMEComponent fme` works.
+- [x] Notes from Phase 5:
+  - The entry point group `dagster_dg_cli.registry_modules` is the current one in both 1.11.0 and 1.13.
+  - The scaffolder writes the YAML as text rather than through `yaml.dump`, so it can keep comments. The commented
+    `{{ env('FME_API_KEY') }}` line isn't evaluated: the scaffolded file loads with `FME_API_KEY` unset. A test also
+    uncomments the block and checks that the component builds the resource.
+  - `ScaffoldRequest.append` (`dg scaffold defs --append`) doesn't exist in 1.11. The scaffolder reads it with
+    `getattr(..., False)`, and the append test is skipped at the floor. The `python` format delegates to Dagster's
+    `scaffold_component` stub.
+  - Tests use two internal helpers, `discover_entry_point_package_objects` and `get_scaffolder`, to check what `dg`
+    sees. Both exist in 1.11.0 and 1.13.
+  - Smoke check (dagster and dagster-dg-cli 1.13.30): `dg list components` lists `dagster_fme.FMEComponent`,
+    `dg scaffold defs dagster_fme.FMEComponent fme` writes the starter file, and `dg check defs` and `dg list defs`
+    pass (two assets and `fme_sensor`).
 
 ## Phase 6: Docs and cleanup
 

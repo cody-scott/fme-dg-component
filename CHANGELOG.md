@@ -28,6 +28,11 @@ monorepo. The entries below are changes from that module's behaviour.
 - Constants `DEFAULT_PAGE_SIZE` and `DEFAULT_MAX_PAGES` in `dagster_fme.resource`.
 - `FMEComponent.build_sensor` now works. With `false`, the component builds the assets with no
   sensor. Before, the field was accepted and ignored.
+- `dg` CLI integration. The package registers `dagster_fme` under the
+  `dagster_dg_cli.registry_modules` entry point, so `dg list components` shows
+  `dagster_fme.FMEComponent`. `dg scaffold defs dagster_fme.FMEComponent <name>` writes a starter
+  `defs.yaml` with one example workspace, the sensor settings, and a commented-out
+  `host`/`api_key` block for an in-component resource.
 
 ### Changed
 
