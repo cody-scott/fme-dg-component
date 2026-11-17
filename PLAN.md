@@ -1,6 +1,6 @@
 # PLAN.md: Rebuild `fme/` into the `dagster-fme` uv package
 
-Status: **in progress** (Phases 0–3 done). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
+Status: **in progress** (Phases 0–4 done). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
 
 ## Goal
 
@@ -135,9 +135,9 @@ Do one bug per commit. In each commit, remove that bug's xfail marker so it beco
 
 ## Phase 4: Feature changes
 
-- [ ] **Configurable job asset leaf**: add `job_asset_name: str = "workspace__fmw"` to `FMEWorkspaceSpec` and
+- [x] **Configurable job asset leaf**: add `job_asset_name: str = "workspace__fmw"` to `FMEWorkspaceSpec` and
       `build_fme_assets`. Test the default and an override.
-- [ ] **Server-side job filtering.** Start by checking which query params FME Flow v4 `GET /jobs` supports
+- [x] **Server-side job filtering.** Start by checking which query params FME Flow v4 `GET /jobs` supports
       (e.g. status, workspace/repository filter, sort field and direction, date range). Write the findings in
       *Open questions* below. Then implement the most efficient option that's supported, in this order of preference:
   1. Per-configured-workspace query: `status=success`, filtered to that workspace, sorted by finish time
@@ -149,14 +149,29 @@ Do one bug per commit. In each commit, remove that bug's xfail marker so it beco
   Keep the strategy behind a resource method such as `get_latest_successful_jobs(workspaces) -> dict[str, Job]`
   so the sensor doesn't depend on which strategy is used. Test every strategy you implement with respx, asserting
   on the request params and call count.
-- [ ] **Optional in-component resource**: add optional `host` and `api_key` (plus optional
+- [x] **Optional in-component resource**: add optional `host` and `api_key` (plus optional
       `page_size`/`max_pages`) fields to `FMEComponent`. If `host` and `api_key` are both set, add
       `resources={resource_key: FMEResource(...)}` to the returned `Definitions`. If neither is set, register no
       resource and expect an external one. If only one is set, fail validation. Test all three cases. The
       YAML example must use env templating for `api_key` (check the exact syntax for the installed Dagster,
       e.g. `"{{ env.FME_API_KEY }}"`).
-- [ ] **`build_sensor` flag**: the original component declares `build_sensor: bool` but ignores it.
+- [x] **`build_sensor` flag**: the original component declares `build_sensor: bool` but ignores it.
       Implement it so that `False` omits the sensor. Test it.
+- [x] Notes from Phase 4:
+  - Job fetching uses **strategy 2** (user decision). `FMEResource.get_latest_successful_jobs(workspaces, since)`
+    requests `status=success&sort=timeFinished_desc` and folds pages into a pure `JobScan`. It stops once every
+    workspace is found or the scan has gone past that workspace's cursor time (`oldest_seen <= since`). If a page
+    arrives out of order, early stop is turned off. Strategy 3 is just strategy 2 without the early stop, so it has
+    no separate code path. Strategy 1 is deferred (see Open questions).
+  - At `max_pages`: raise `FMEPaginationLimitError` only if a workspace **with** a cursor is unresolved. If only
+    first-sight workspaces are left, log a warning and return what was found (user decision).
+  - Removed `extract_jobs`, `get_fme_data` and `get_fme_states`. `parse_fme_time` moved to `resource.py`. Jobs with
+    no `workspace`, or with no `timeFinished` for an unconfigured workspace, are skipped instead of raising.
+  - Env templating: use `"{{ env('FME_API_KEY') }}"` (it raises if unset, on both 1.11 and 1.13). `{{ env.X }}`
+    resolves to `None` when unset.
+  - Pydantic validation errors include the input, so a resolved `api_key` would leak. `FMEComponent` sets
+    `hide_input_in_errors=True`, and `api_key` has `repr=False`. Tests check that the secret isn't in errors or repr.
+  - Follow-up for Phase 6: `FMEResource` itself still shows `api_key` in its repr.
 
 ## Phase 5: dg CLI integration
 
@@ -205,6 +220,10 @@ Agents: put findings here and don't silently guess.
     which the spec doesn't currently carry. Strategy 2 (default sort `timeFinished_desc`, early stop) needs nothing new.
 - [ ] Are workspace names unique across FME repositories? If not, should matching use `repository/workspace`?
       Ask the user before changing the match key, because it changes the cursor format.
+  - Related follow-up (deferred in Phase 4, user decision): an optional `repository` on `FMEWorkspaceSpec` would
+    let those workspaces use strategy 1 (`repository` + `workspace` filter, `limit=1`, one request each).
 - [x] Do the monorepo callers need back-compat aliases (`FME`, `FMEAssetSpec`, `build_asset_sensor`)? No (user decision).
-- [ ] What is the exact env-templating syntax and component-testing helper for the Dagster floor (1.11) compared with the latest?
-  - Testing helper: settled, see the Phase 2 notes. Env templating is still to check in Phase 4.
+- [x] What is the exact env-templating syntax and component-testing helper for the Dagster floor (1.11) compared with the latest?
+  - Testing helper: settled, see the Phase 2 notes.
+  - Env templating: `{{ env('VAR') }}` (raises if unset) and `{{ env.VAR }}` (gives `None` if unset) work on both
+    1.11.0 and 1.13. Use the function form.

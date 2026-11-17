@@ -8,6 +8,37 @@ All notable changes to `dagster-fme` are recorded here. The format follows
 First release as a standalone package, ported from the `fme/` module of the `snowflake_analytics`
 monorepo. The entries below are changes from that module's behaviour.
 
+### Added
+
+- `job_asset_name` on `FMEWorkspaceSpec`, `build_fme_assets` and `FMEWorkspace` sets the last
+  key component of the job asset. It defaults to `workspace__fmw`, so existing keys don't change.
+- `FMEResource.get_latest_successful_jobs(workspaces, since)` requests jobs newest first
+  (`status=success&sort=timeFinished_desc`). It stops paging once every workspace is found or
+  the scan has gone past that workspace's cursor time. The sensor uses it instead of fetching
+  every successful job on every tick. When `max_pages` is reached, it raises
+  `FMEPaginationLimitError` only if a workspace with a cursor is still unresolved. If only
+  first-sight workspaces are left, it logs a warning and returns what it found.
+- `FMEComponent` can define its own `FMEResource`. Set `host` and `api_key` (plus optional
+  `page_size` and `max_pages`) and the component registers the resource under `resource_key`.
+  Leave both unset to use an external resource. Setting only one of `host`/`api_key`, or setting
+  `page_size`/`max_pages` without `host`, fails validation. Supply `api_key` with
+  `"{{ env('FME_API_KEY') }}"`, which fails if the variable is unset. Plain `{{ env.FME_API_KEY }}`
+  quietly resolves to nothing. The component keeps input values out of validation errors and
+  `api_key` out of its repr.
+- Constants `DEFAULT_PAGE_SIZE` and `DEFAULT_MAX_PAGES` in `dagster_fme.resource`.
+- `FMEComponent.build_sensor` now works. With `false`, the component builds the assets with no
+  sensor. Before, the field was accepted and ignored.
+
+### Changed
+
+- Successful jobs with no `workspace`, or with no `timeFinished` for a workspace that isn't
+  configured, are now skipped. Before, any such job anywhere in the history stopped the sensor.
+- `FMEResource.request_offset_paginated` is now typed as returning a `Generator`, so callers can
+  `close()` it after stopping early.
+- Removed the internal helpers `extract_jobs`, `get_fme_data` and `get_fme_states` from
+  `dagster_fme.sensor`. `parse_fme_time` moved to `dagster_fme.resource`, and `dagster_fme.sensor`
+  still imports it.
+
 ### Fixed
 
 - **BUG-4**: Offset pagination stops once `offset + len(items) >= totalCount`, or when a page has

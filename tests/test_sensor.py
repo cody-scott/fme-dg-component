@@ -228,3 +228,20 @@ def test_metadata_omits_missing_fields() -> None:
 
 def test_sensor_uses_public_resource_access() -> None:
     assert "original_resource_dict" not in inspect.getsource(sensor_module)
+
+
+def test_sensor_passes_cursor_to_the_early_stop_scan(respx_mock: respx.MockRouter) -> None:
+    route = respx_mock.get(JOBS_URL).mock(side_effect=jobs_responder("jobs_multiple_runs.json"))
+    resource = FMEResource(host="https://fme.example.com", api_key="k", page_size=1)
+    sensor = build_fme_sensor(_workspaces(), "fme_sensor", "fme")
+    # Both cursors are later than every job, so the first page already passes them.
+    future = "2027-01-01T00:00:00+00:00"
+    context = dg.build_sensor_context(
+        cursor=json.dumps({"alpha.fmw": future, "Beta Load.fmw": future}),
+        resources={"fme": resource},
+    )
+    result = sensor(context)
+    assert isinstance(result, dg.SensorResult)
+    assert result.asset_events == []
+    assert route.call_count == 1
+    assert route.calls[0].request.url.params["sort"] == "timeFinished_desc"

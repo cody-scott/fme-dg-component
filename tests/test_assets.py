@@ -80,3 +80,14 @@ def test_caller_lists_are_copied() -> None:
     ws = FMEWorkspace("alpha.fmw", key_prefix=prefix)
     prefix.append("mutated")
     assert ws.job_asset_spec.key == dg.AssetKey(["fme", "workspace__fmw"])
+
+
+def test_job_asset_name_override() -> None:
+    ws = build_fme_assets("alpha.fmw", asset_list=["table_a"], job_asset_name="job")
+    assert [s.key for s in ws.asset_specs] == [
+        dg.AssetKey(["fme", "alpha__fmw", "job"]),
+        dg.AssetKey(["fme", "alpha__fmw", "table_a"]),
+    ]
+    assert FMEWorkspace("alpha.fmw", job_asset_name="job").job_asset_spec.key == dg.AssetKey(
+        ["fme", "job"]
+    )

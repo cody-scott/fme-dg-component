@@ -8,14 +8,13 @@ from __future__ import annotations
 
 import datetime
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, TypedDict, cast
 
 import dagster as dg
-import httpx
 
 from dagster_fme.assets import FMEWorkspace
-from dagster_fme.resource import FMEResource
+from dagster_fme.resource import FMEResource, parse_fme_time
 
 
 class LatestJob(TypedDict):
@@ -24,11 +23,6 @@ class LatestJob(TypedDict):
     id: Any
     time_finished: datetime.datetime
     data: dict[str, Any]
-
-
-def parse_fme_time(value: str) -> datetime.datetime:
-    """Parse an FME ISO-8601 timestamp, accepting a ``Z`` suffix or a UTC offset."""
-    return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def build_materialization_metadata(job: Mapping[str, Any]) -> dict[str, dg.MetadataValue]:
@@ -81,11 +75,6 @@ def parse_cursor(cursor: str | None) -> dict[str, str]:
     if cursor is None or cursor == "":
         return {}
     return json.loads(cursor)
-
-
-def extract_jobs(pages: Iterable[httpx.Response]) -> list[dict[str, Any]]:
-    """Flatten the ``items`` of every ``/jobs`` page into one list."""
-    return [item for page in pages for item in page.json().get("items") or []]
 
 
 def get_latest_time_for_responses(responses: Sequence[dict[str, Any]]) -> dict[str, LatestJob]:
@@ -175,14 +164,9 @@ def evaluate_jobs(
     return events, new_cursor
 
 
-def get_fme_data(fme: FMEResource) -> list[dict[str, Any]]:
-    """Fetch every successful job from FME Flow."""
-    return extract_jobs(fme.request_offset_paginated("/jobs", params={"status": "success"}))
-
-
-def get_fme_states(fme: FMEResource) -> dict[str, LatestJob]:
-    """Fetch successful jobs and reduce them to the latest job per workspace."""
-    return get_latest_time_for_responses(get_fme_data(fme))
+def cursor_times(cursor: Mapping[str, str]) -> dict[str, datetime.datetime]:
+    """Parse the cursor's ISO-8601 values into datetimes."""
+    return {ws: datetime.datetime.fromisoformat(t) for ws, t in cursor.items()}
 
 
 def build_fme_sensor(
@@ -193,10 +177,10 @@ def build_fme_sensor(
 ) -> dg.SensorDefinition:
     """Build a sensor that materializes FME workspace assets from successful jobs.
 
-    On each tick the sensor fetches successful jobs from FME Flow and finds the latest
-    finish per workspace. A workspace's first finish is recorded in the cursor as a
-    baseline and emits nothing. A strictly newer finish emits an ``AssetMaterialization``
-    for every asset spec of that workspace.
+    On each tick the sensor asks FME Flow for the latest successful job of each
+    workspace, using ``FMEResource.get_latest_successful_jobs``. A workspace's first
+    finish is recorded in the cursor as a baseline and emits nothing. A strictly newer
+    finish emits an ``AssetMaterialization`` for every asset spec of that workspace.
 
     Args:
         fme_assets: The workspaces to watch.
@@ -223,7 +207,10 @@ def build_fme_sensor(
         fme_resource = cast(FMEResource, getattr(context.resources, fme_resource_key))
 
         cursor = parse_cursor(context.cursor)
-        latest = get_fme_states(fme_resource)
+        jobs = fme_resource.get_latest_successful_jobs(
+            [a.fqn for a in fme_assets], since=cursor_times(cursor)
+        )
+        latest = get_latest_time_for_responses(list(jobs.values()))
         events, new_cursor = evaluate_jobs(cursor, latest, fme_assets)
 
         return dg.SensorResult(asset_events=events, cursor=json.dumps(new_cursor))

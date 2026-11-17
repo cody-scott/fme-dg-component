@@ -8,7 +8,7 @@ from collections.abc import Callable
 import dagster as dg
 import pytest
 
-from dagster_fme import FMEWorkspaceSpec
+from dagster_fme import FMEComponent, FMEResource, FMEWorkspaceSpec
 
 DEFS_YAML = """
 type: dagster_fme.FMEComponent
@@ -27,6 +27,16 @@ attributes:
 """
 
 Loader = Callable[[str], dg.Definitions]
+
+
+def _chain(exc: BaseException) -> str:
+    """Every message in an exception chain. Dagster wraps component validation errors."""
+    messages: list[str] = []
+    err: BaseException | None = exc
+    while err is not None:
+        messages.append(str(err))
+        err = err.__cause__ or err.__context__
+    return "\n".join(messages)
 
 
 def _asset_keys(defs: dg.Definitions) -> set[str]:
@@ -66,15 +76,7 @@ def test_duplicate_workspaces_are_rejected(load_component_defs: Loader) -> None:
                 - workspace: alpha.fmw
             """
         )
-    # Dagster wraps the validation error, so search the whole exception chain.
-    messages: list[str] = []
-    err: BaseException | None = exc.value
-    while err is not None:
-        messages.append(str(err))
-        err = err.__cause__ or err.__context__
-    assert re.search(
-        r"Duplicate workspace\(s\) in fme_asset_specs: alpha\.fmw", "\n".join(messages)
-    )
+    assert re.search(r"Duplicate workspace\(s\) in fme_asset_specs: alpha\.fmw", _chain(exc.value))
 
 
 def test_default_key_prefix_matches_builder(load_component_defs: Loader) -> None:
@@ -88,3 +90,109 @@ def test_default_key_prefix_matches_builder(load_component_defs: Loader) -> None
         """
     )
     assert _asset_keys(defs) == {"fme/alpha__fmw/workspace__fmw", "fme/alpha__fmw/table_a"}
+
+
+def test_job_asset_name_from_yaml(load_component_defs: Loader) -> None:
+    defs = load_component_defs(
+        """
+        type: dagster_fme.FMEComponent
+        attributes:
+          fme_asset_specs:
+            - workspace: alpha.fmw
+              job_asset_name: run
+              asset_list: [table_a]
+            - workspace: beta.fmw
+        """
+    )
+    assert _asset_keys(defs) == {
+        "fme/alpha__fmw/run",
+        "fme/alpha__fmw/table_a",
+        "fme/beta__fmw/workspace__fmw",
+    }
+
+
+# --- optional in-component resource ----------------------------------------------------
+
+SECRET = "secret-from-env"
+
+
+def _resource_yaml(extra: str) -> str:
+    return f"""
+type: dagster_fme.FMEComponent
+attributes:
+  resource_key: my_fme
+{extra}
+  fme_asset_specs:
+    - workspace: alpha.fmw
+"""
+
+
+def test_component_defines_resource_from_env(
+    load_component_defs: Loader, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FME_API_KEY", SECRET)
+    defs = load_component_defs(
+        _resource_yaml(
+            """  host: https://fme.example.com
+  api_key: "{{ env('FME_API_KEY') }}"
+  page_size: 50
+  max_pages: 3"""
+        )
+    )
+    resource = (defs.resources or {})["my_fme"]
+    assert isinstance(resource, FMEResource)
+    assert resource.host == "https://fme.example.com"
+    assert resource.api_key == SECRET
+    assert (resource.page_size, resource.max_pages) == (50, 3)
+    # The sensor's required resource key is satisfied by the component's own resource.
+    dg.Definitions.validate_loadable(defs)
+
+
+def test_component_resource_uses_resource_defaults(load_component_defs: Loader) -> None:
+    defs = load_component_defs(_resource_yaml("  host: https://fme.example.com\n  api_key: k"))
+    resource = (defs.resources or {})["my_fme"]
+    assert isinstance(resource, FMEResource)
+    assert (resource.page_size, resource.max_pages) == (1000, 20)
+
+
+def test_component_without_host_registers_no_resource(load_component_defs: Loader) -> None:
+    defs = load_component_defs(_resource_yaml(""))
+    assert not defs.resources
+
+
+@pytest.mark.parametrize(
+    ("extra", "match"),
+    [
+        ("  host: https://fme.example.com", "host and api_key must be set together"),
+        ("  api_key: \"{{ env('FME_API_KEY') }}\"", "host and api_key must be set together"),
+        ("  page_size: 10", "page_size and max_pages only apply"),
+        ("  max_pages: 10", "page_size and max_pages only apply"),
+    ],
+)
+def test_component_resource_settings_are_validated(
+    load_component_defs: Loader, monkeypatch: pytest.MonkeyPatch, extra: str, match: str
+) -> None:
+    monkeypatch.setenv("FME_API_KEY", SECRET)
+    with pytest.raises(Exception) as exc:
+        load_component_defs(_resource_yaml(extra))
+    assert match in _chain(exc.value)
+    assert SECRET not in _chain(exc.value)
+
+
+def test_component_api_key_not_in_repr() -> None:
+    component = FMEComponent(host="https://fme.example.com", api_key=SECRET, fme_asset_specs=[])
+    assert SECRET not in repr(component)
+
+
+def test_build_sensor_false_omits_sensor(load_component_defs: Loader) -> None:
+    defs = load_component_defs(
+        """
+        type: dagster_fme.FMEComponent
+        attributes:
+          build_sensor: false
+          fme_asset_specs:
+            - workspace: alpha.fmw
+        """
+    )
+    assert not list(defs.sensors or [])
+    assert _asset_keys(defs) == {"fme/alpha__fmw/workspace__fmw"}
