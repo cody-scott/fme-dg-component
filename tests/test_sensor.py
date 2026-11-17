@@ -79,6 +79,13 @@ def test_load_cursor_json() -> None:
     }
 
 
+def test_load_cursor_treats_naive_time_as_utc() -> None:
+    cursor = load_cursor('{"a": "2026-01-01T00:00:00"}')
+    assert cursor == {"a": datetime.datetime(2026, 1, 1, tzinfo=UTC)}
+    assert cursor["a"].tzinfo is not None
+    assert dump_cursor(cursor) == '{"a": "2026-01-01T00:00:00+00:00"}'
+
+
 def test_cursor_round_trips_byte_for_byte() -> None:
     # Written by the pre-Phase-7 sensor: json.dumps of isoformat() strings.
     written = json.dumps(

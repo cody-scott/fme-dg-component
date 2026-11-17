@@ -1,6 +1,6 @@
 # PLAN.md: Rebuild `fme/` into the `dagster-fme` uv package
 
-Status: **in progress** (Phases 0–6 done and merged, Phase 7 in review. Phases 7–10 come from the code review in
+Status: **in progress** (Phases 0–6 done and merged, Phase 7 merged, Phase 8 in review. Phases 7–10 come from the code review in
 [`docs/SPEC.md`](docs/SPEC.md); Phases 9 and 10 wait on user decisions). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
 
 ## Goal
@@ -267,14 +267,23 @@ private helper.
 Branch: `phase-8/fix-review-bugs`. Each bug lands as an `xfail(strict=True, reason="N-n: ...")` test first, then the
 fix commit removes the marker, as in Phase 3.
 
-- [ ] **N-1**: `asset_spec_kwargs={"description": ...}` must not raise. The caller's description wins over the
+- [x] **N-1**: `asset_spec_kwargs={"description": ...}` must not raise. The caller's description wins over the
       default. Test both the override and the default.
-- [ ] **N-5**: `FMEComponent` also rejects workspaces whose **cleaned** names collide (e.g. `a.b` and `a-b`), naming
+- [x] **N-5**: `FMEComponent` also rejects workspaces whose **cleaned** names collide (e.g. `a.b` and `a-b`), naming
       both raw workspaces in the error.
-- [ ] **N-8**: `load_cursor` treats a timestamp with no timezone as UTC. Test a hand-written naive cursor value.
-- [ ] **N-9**: scaffolder append mode writes a newline before `---` when the existing file doesn't end with one.
+- [x] **N-8**: `load_cursor` treats a timestamp with no timezone as UTC. Test a hand-written naive cursor value.
+- [x] **N-9**: scaffolder append mode writes a newline before `---` when the existing file doesn't end with one.
       Test with a file that has no trailing newline (skipped at the 1.11 floor, like the existing append test).
-- [ ] Record each fix in `CHANGELOG.md` under *Unreleased*.
+- [x] Record each fix in `CHANGELOG.md` under *Unreleased*.
+- [x] Notes from Phase 8:
+  - N-1: the caller's `description` also reaches the child assets, as every other `asset_spec_kwargs` key does.
+  - N-5: names collide only when the `key_prefix` matches as well, so `a.b` under `fme` and `a-b` under `other`
+    are still allowed (tested). The raw-name duplicate check runs first and keeps its own message.
+  - N-8: the naive-as-UTC rule is in `load_cursor` only. Job times from FME still go through `parse_fme_time`
+    unchanged (see the open question on `timeFinished` timezones).
+  - Gate note: `uv sync --resolution lowest-direct && uv run pytest` silently tests the **locked** versions,
+    because `uv run` re-syncs. Set `UV_RESOLUTION=lowest-direct` for every command, as CI does. Fixed in
+    `AGENTS.md`. Verified at dagster 1.11.0 / httpx 0.27.0: 84 passed, 2 append tests skipped.
 
 ### Phase 9: Make the job scan robust on busy servers (needs user decisions)
 

@@ -29,7 +29,7 @@ All commands go through `uv`. Don't call `pip`, `python -m venv` or the system `
 | Format | `uv run ruff format .` |
 | Type check | `uv run pyright` |
 | All pre-commit hooks | `uv run pre-commit run --all-files` |
-| Lowest supported deps | `uv sync --resolution lowest-direct && uv run pytest` |
+| Lowest supported deps | `UV_RESOLUTION=lowest-direct uv run pytest` (the env var matters: a plain `uv run` re-syncs to the lock) |
 | Add a runtime dep | `uv add <pkg>` |
 | Add a dev dep | `uv add --dev <pkg>` |
 

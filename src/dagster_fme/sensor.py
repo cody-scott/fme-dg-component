@@ -62,9 +62,14 @@ def build_materialization_metadata(job: Mapping[str, Any]) -> dict[str, dg.Metad
 def load_cursor(raw: str | None) -> dict[str, datetime.datetime]:
     """Parse the sensor cursor, ``{"<workspace>": "<ISO-8601 timeFinished>"}``.
 
-    An empty or missing cursor parses to ``{}``.
+    An empty or missing cursor parses to ``{}``. A timestamp with no timezone (e.g. a
+    hand-edited cursor) is treated as UTC, so it compares with FME's aware times.
     """
-    return {ws: parse_fme_time(t) for ws, t in json.loads(raw or "{}").items()}
+    cursor: dict[str, datetime.datetime] = {}
+    for ws, value in json.loads(raw or "{}").items():
+        t = parse_fme_time(value)
+        cursor[ws] = t if t.tzinfo is not None else t.replace(tzinfo=datetime.timezone.utc)
+    return cursor
 
 
 def dump_cursor(cursor: Mapping[str, datetime.datetime]) -> str:

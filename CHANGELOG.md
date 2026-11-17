@@ -5,6 +5,18 @@ All notable changes to `dagster-fme` are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- N-1: passing `description` in `asset_spec_kwargs` no longer raises `TypeError` on the job
+  asset. The caller's description now replaces the default one.
+- N-5: `FMEComponent` rejects distinct workspaces whose cleaned names give the same asset keys
+  (e.g. `a.b` and `a-b` under the same `key_prefix`). The error names both raw workspaces and
+  the shared key, instead of Dagster's later duplicate-key error.
+- N-8: a cursor timestamp with no timezone (e.g. hand-edited) is read as UTC instead of
+  raising `TypeError` when compared with FME's times. It's written back with `+00:00`.
+- N-9: `dg scaffold defs --append` starts the `---` separator on a new line when the existing
+  `defs.yaml` doesn't end with one, so the result stays valid YAML.
+
 ### Changed
 
 - Internal simplification of the sensor and resource (Phase 7, review items R1, R2 and R4 to R8).

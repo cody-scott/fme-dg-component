@@ -112,6 +112,16 @@ def test_scaffold_append_adds_a_second_document(tmp_path: Path) -> None:
     assert [d["type"] for d in docs] == ["other.Component", TYPE_NAME]
 
 
+@pytest.mark.skipif(not SUPPORTS_APPEND, reason="ScaffoldRequest.append needs Dagster > 1.11")
+def test_scaffold_append_without_trailing_newline(tmp_path: Path) -> None:
+    defs_yaml = tmp_path / "defs.yaml"
+    defs_yaml.write_text("type: other.Component\nattributes: {}")
+    _scaffold(defs_yaml, append=True)
+
+    docs = list(yaml.safe_load_all(defs_yaml.read_text()))
+    assert [d["type"] for d in docs] == ["other.Component", TYPE_NAME]
+
+
 def test_scaffold_python_format_writes_component_stub(tmp_path: Path) -> None:
     _scaffold(tmp_path, "python")
 
