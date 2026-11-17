@@ -182,3 +182,17 @@ def test_component_resource_settings_are_validated(
 def test_component_api_key_not_in_repr() -> None:
     component = FMEComponent(host="https://fme.example.com", api_key=SECRET, fme_asset_specs=[])
     assert SECRET not in repr(component)
+
+
+def test_build_sensor_false_omits_sensor(load_component_defs: Loader) -> None:
+    defs = load_component_defs(
+        """
+        type: dagster_fme.FMEComponent
+        attributes:
+          build_sensor: false
+          fme_asset_specs:
+            - workspace: alpha.fmw
+        """
+    )
+    assert not list(defs.sensors or [])
+    assert _asset_keys(defs) == {"fme/alpha__fmw/workspace__fmw"}

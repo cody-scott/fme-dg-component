@@ -89,7 +89,11 @@ class FMEComponent(dg.Component, dg.Model, dg.Resolvable):
         )
 
     def build_defs(self, context: dg.ComponentLoadContext) -> dg.Definitions:
-        """Build the asset specs for every workspace and one sensor over all of them."""
+        """Build the component's definitions.
+
+        These are the asset specs for every workspace, one sensor over all of them unless
+        ``build_sensor`` is False, and the FME resource if ``host`` and ``api_key`` are set.
+        """
         all_assets = [
             build_fme_assets(
                 spec.workspace,
@@ -103,14 +107,19 @@ class FMEComponent(dg.Component, dg.Model, dg.Resolvable):
 
         all_specs = [spec for a in all_assets for spec in a.asset_specs]
 
-        # build_sensor is declared but ignored (Phase 4).
-        sensor = build_fme_sensor(
-            all_assets,
-            self.sensor_name,
-            self.resource_key,
-            self.sensor_check_minutes * 60,
+        sensors = (
+            [
+                build_fme_sensor(
+                    all_assets,
+                    self.sensor_name,
+                    self.resource_key,
+                    self.sensor_check_minutes * 60,
+                )
+            ]
+            if self.build_sensor
+            else []
         )
 
         resource = self.build_resource()
         resources = {self.resource_key: resource} if resource is not None else None
-        return dg.Definitions(assets=all_specs, sensors=[sensor], resources=resources)
+        return dg.Definitions(assets=all_specs, sensors=sensors, resources=resources)
