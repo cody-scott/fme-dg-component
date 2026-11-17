@@ -247,3 +247,14 @@ def test_scan_raises_for_target_job_without_time() -> None:
 def test_scan_complete_with_no_jobs_only_when_nothing_targeted() -> None:
     assert JobScan(targets=frozenset(), since={}).is_complete
     assert not JobScan(targets=frozenset({"a"}), since={"a": T0}).is_complete
+
+
+def test_scan_picks_latest_per_workspace_across_timezones() -> None:
+    items = load_fixture("jobs_multiple_runs.json")["items"]
+    scan = JobScan(targets=frozenset({"alpha.fmw", "Beta Load.fmw"}), since={})
+    scan.add_page(items)
+    # 09:30-05:00 is 14:30Z, later than 12:15Z.
+    assert scan.found["alpha.fmw"]["id"] == 302
+    # 07:20+02:00 is 05:20Z, later than 23:30Z the day before.
+    assert scan.found["Beta Load.fmw"]["id"] == 304
+    assert scan.found["Beta Load.fmw"]["repository"] == "Samples"

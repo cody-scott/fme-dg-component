@@ -9,20 +9,12 @@ from __future__ import annotations
 import datetime
 import json
 from collections.abc import Mapping, Sequence
-from typing import Any, TypedDict, cast
+from typing import Any, cast
 
 import dagster as dg
 
 from dagster_fme.assets import FMEWorkspace
 from dagster_fme.resource import FMEResource, parse_fme_time
-
-
-class LatestJob(TypedDict):
-    """The most recent finished job seen for a workspace."""
-
-    id: Any
-    time_finished: datetime.datetime
-    data: dict[str, Any]
 
 
 def build_materialization_metadata(job: Mapping[str, Any]) -> dict[str, dg.MetadataValue]:
@@ -67,106 +59,69 @@ def build_materialization_metadata(job: Mapping[str, Any]) -> dict[str, dg.Metad
     return metadata
 
 
-def parse_cursor(cursor: str | None) -> dict[str, str]:
+def load_cursor(raw: str | None) -> dict[str, datetime.datetime]:
     """Parse the sensor cursor, ``{"<workspace>": "<ISO-8601 timeFinished>"}``.
 
     An empty or missing cursor parses to ``{}``.
     """
-    if cursor is None or cursor == "":
-        return {}
-    return json.loads(cursor)
+    return {ws: parse_fme_time(t) for ws, t in json.loads(raw or "{}").items()}
 
 
-def get_latest_time_for_responses(responses: Sequence[dict[str, Any]]) -> dict[str, LatestJob]:
-    """Pick the latest-finishing job for each workspace.
-
-    Args:
-        responses: Job objects from the FME ``/jobs`` endpoint.
-
-    Returns:
-        A mapping of raw workspace name to its latest job.
-
-    Raises:
-        ValueError: If a job has no ``workspace`` or no ``timeFinished``.
-    """
-    output: dict[str, LatestJob] = {}
-
-    for job in responses:
-        workspace = job.get("workspace")
-        raw_time_finished = job.get("timeFinished")
-
-        if workspace is None:
-            dg.get_dagster_logger().error(job)
-            raise ValueError("Workspace cannot be None")
-
-        if raw_time_finished is None:
-            dg.get_dagster_logger().error(job)
-            raise ValueError("Time finished cannot be None")
-
-        time_finished = parse_fme_time(raw_time_finished)
-        save: LatestJob = {"id": job.get("id"), "time_finished": time_finished, "data": job}
-
-        if workspace not in output or output[workspace]["time_finished"] < time_finished:
-            output[workspace] = save
-
-    return output
+def dump_cursor(cursor: Mapping[str, datetime.datetime]) -> str:
+    """Serialise a cursor as JSON ``{"<workspace>": "<ISO-8601 timeFinished>"}``."""
+    return json.dumps({ws: t.isoformat() for ws, t in cursor.items()})
 
 
 def evaluate_jobs(
-    cursor: Mapping[str, str],
-    latest: Mapping[str, LatestJob],
+    cursor: Mapping[str, datetime.datetime],
+    jobs: Mapping[str, Mapping[str, Any]],
     fme_assets: Sequence[FMEWorkspace],
-) -> tuple[list[dg.AssetMaterialization], dict[str, str]]:
+) -> tuple[list[dg.AssetMaterialization], dict[str, datetime.datetime]]:
     """Decide which materializations to emit and compute the next cursor.
 
     A workspace seen for the first time is recorded as a baseline and emits nothing.
     A strictly newer ``timeFinished`` than the cursor emits a materialization for
     every asset spec of that workspace. Configured workspaces that have no job in
-    ``latest`` keep their existing cursor value. Cursor entries for workspaces that
+    ``jobs`` keep their existing cursor value. Cursor entries for workspaces that
     are no longer configured are dropped.
 
     Args:
-        cursor: The parsed current cursor.
-        latest: The latest job per workspace, from ``get_latest_time_for_responses``.
+        cursor: The current cursor, from ``load_cursor``.
+        jobs: The latest successful job per raw workspace name, from
+            ``FMEResource.get_latest_successful_jobs``.
         fme_assets: The configured workspaces.
 
     Returns:
         The materializations to emit and the new cursor.
     """
-    fqn_dict = {a.fqn: a for a in fme_assets}
-
-    new_cursor: dict[str, str] = {ws: t for ws, t in cursor.items() if ws in fqn_dict}
     events: list[dg.AssetMaterialization] = []
+    new_cursor: dict[str, datetime.datetime] = {}
 
-    for workspace, item in latest.items():
-        asset_obj = fqn_dict.get(workspace)
-        if asset_obj is None:
+    for asset in fme_assets:
+        workspace = asset.workspace
+        previous = cursor.get(workspace)
+        job = jobs.get(workspace)
+
+        if job is None:
+            if previous is not None:
+                new_cursor[workspace] = previous
             continue
 
-        time_finished = item["time_finished"]
-        last_time_str = cursor.get(workspace)
-
-        if last_time_str is None:
-            new_cursor[workspace] = time_finished.isoformat()
+        finished = parse_fme_time(job["timeFinished"])
+        if previous is None:
+            new_cursor[workspace] = finished
             continue
 
-        cursor_time = last_time_str
-        if time_finished > datetime.datetime.fromisoformat(last_time_str):
-            cursor_time = time_finished.isoformat()
-            metadata = build_materialization_metadata(item["data"])
+        if finished > previous:
+            metadata = build_materialization_metadata(job)
             events.extend(
-                dg.AssetMaterialization(spec.key, metadata=metadata)
-                for spec in asset_obj.asset_specs
+                dg.AssetMaterialization(spec.key, metadata=metadata) for spec in asset.asset_specs
             )
-
-        new_cursor[workspace] = cursor_time
+            new_cursor[workspace] = finished
+        else:
+            new_cursor[workspace] = previous
 
     return events, new_cursor
-
-
-def cursor_times(cursor: Mapping[str, str]) -> dict[str, datetime.datetime]:
-    """Parse the cursor's ISO-8601 values into datetimes."""
-    return {ws: datetime.datetime.fromisoformat(t) for ws, t in cursor.items()}
 
 
 def build_fme_sensor(
@@ -206,13 +161,12 @@ def build_fme_sensor(
         # is invoked directly (`sensor(context)`); the resource is read from `context`.
         fme_resource = cast(FMEResource, getattr(context.resources, fme_resource_key))
 
-        cursor = parse_cursor(context.cursor)
+        cursor = load_cursor(context.cursor)
         jobs = fme_resource.get_latest_successful_jobs(
-            [a.fqn for a in fme_assets], since=cursor_times(cursor)
+            [a.workspace for a in fme_assets], since=cursor
         )
-        latest = get_latest_time_for_responses(list(jobs.values()))
-        events, new_cursor = evaluate_jobs(cursor, latest, fme_assets)
+        events, new_cursor = evaluate_jobs(cursor, jobs, fme_assets)
 
-        return dg.SensorResult(asset_events=events, cursor=json.dumps(new_cursor))
+        return dg.SensorResult(asset_events=events, cursor=dump_cursor(new_cursor))
 
     return _sensor
