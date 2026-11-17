@@ -8,6 +8,11 @@ All notable changes to `dagster-fme` are recorded here. The format follows
 First release as a standalone package, ported from the `fme/` module of the `snowflake_analytics`
 monorepo. The entries below are changes from that module's behaviour.
 
+### Added
+
+- `job_asset_name` on `FMEWorkspaceSpec`, `build_fme_assets` and `FMEWorkspace` sets the last
+  key component of the job asset. It defaults to `workspace__fmw`, so existing keys don't change.
+
 ### Fixed
 
 - **BUG-4**: Offset pagination stops once `offset + len(items) >= totalCount`, or when a page has

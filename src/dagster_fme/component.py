@@ -7,7 +7,7 @@ from collections import Counter
 import dagster as dg
 from pydantic import Field, field_validator
 
-from dagster_fme.assets import build_fme_assets
+from dagster_fme.assets import DEFAULT_JOB_ASSET_NAME, build_fme_assets
 from dagster_fme.sensor import build_fme_sensor
 
 
@@ -18,6 +18,7 @@ class FMEWorkspaceSpec(dg.Model):
     key_prefix: list[str] = Field(default_factory=lambda: ["fme"])
     asset_list: list[str] = Field(default_factory=list)
     include_job_asset: bool = True
+    job_asset_name: str = DEFAULT_JOB_ASSET_NAME
 
 
 class FMEComponent(dg.Component, dg.Model, dg.Resolvable):
@@ -57,6 +58,7 @@ class FMEComponent(dg.Component, dg.Model, dg.Resolvable):
                 spec.key_prefix,
                 spec.asset_list,
                 include_job_asset=spec.include_job_asset,
+                job_asset_name=spec.job_asset_name,
             )
             for spec in self.fme_asset_specs
         ]

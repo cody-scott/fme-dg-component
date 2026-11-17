@@ -8,6 +8,9 @@ from typing import Any
 
 import dagster as dg
 
+DEFAULT_JOB_ASSET_NAME = "workspace__fmw"
+"""Default last key component of a workspace's job asset."""
+
 
 class FMEWorkspace:
     """An FME workspace and the asset specs that represent it.
@@ -21,6 +24,7 @@ class FMEWorkspace:
     _asset_list: list[dg.AssetSpec]
     _include_job_asset: bool
     _asset_spec_kwargs: dict[str, Any]
+    _job_asset_name: str
 
     def __init__(
         self,
@@ -29,6 +33,7 @@ class FMEWorkspace:
         asset_list: Sequence[dg.AssetSpec] | None = None,
         include_job_asset: bool = True,
         asset_spec_kwargs: dict[str, Any] | None = None,
+        job_asset_name: str = DEFAULT_JOB_ASSET_NAME,
     ) -> None:
         """Bundle an FME workspace with the asset specs it produces.
 
@@ -38,19 +43,22 @@ class FMEWorkspace:
         Args:
             workspace: Raw FME workspace name, exactly as the FME API reports it.
             key_prefix: Key prefix for the job asset, which is keyed
-                ``key_prefix + ["workspace__fmw"]``. Defaults to ``["fme"]``.
+                ``key_prefix + [job_asset_name]``. Defaults to ``["fme"]``.
             asset_list: Specs for the downstream assets the workspace produces.
                 Defaults to none.
             include_job_asset: Whether ``asset_specs`` includes the asset for the
                 workspace itself. Defaults to True.
             asset_spec_kwargs: Extra keyword arguments for the job asset's ``AssetSpec``,
                 such as ``group_name`` or ``owners``.
+            job_asset_name: Last key component of the job asset. Defaults to
+                ``"workspace__fmw"``.
         """
         self._workspace = workspace
         self._key_prefix = list(key_prefix) if key_prefix is not None else ["fme"]
         self._asset_list = list(asset_list) if asset_list is not None else []
         self._include_job_asset = include_job_asset
         self._asset_spec_kwargs = asset_spec_kwargs if asset_spec_kwargs is not None else {}
+        self._job_asset_name = job_asset_name
 
     @property
     def workspace(self) -> str:
@@ -78,7 +86,7 @@ class FMEWorkspace:
     @property
     def job_asset_spec(self) -> dg.AssetSpec:
         """The spec for the asset that represents the workspace itself."""
-        key = [*self._key_prefix, "workspace__fmw"]
+        key = [*self._key_prefix, self._job_asset_name]
         spec_args: dict[str, Any] = self._asset_spec_kwargs | {"key": key}
         desc = f"""
         This is the asset that represents the workspace `{self._workspace}`.
@@ -101,11 +109,12 @@ def build_fme_assets(
     asset_list: Sequence[str] | None = None,
     include_job_asset: bool = True,
     asset_spec_kwargs: dict[str, Any] | None = None,
+    job_asset_name: str = DEFAULT_JOB_ASSET_NAME,
 ) -> FMEWorkspace:
     """Build the asset specs for one FME workspace.
 
     Every asset is nested under the cleaned workspace name. The job asset is keyed
-    ``key_prefix + [clean_workspace(workspace), "workspace__fmw"]`` and each child asset
+    ``key_prefix + [clean_workspace(workspace), job_asset_name]`` and each child asset
     ``key_prefix + [clean_workspace(workspace), asset]``. The sensor materializes all of
     them when a newer successful job for the workspace finishes.
 
@@ -118,6 +127,8 @@ def build_fme_assets(
             Defaults to True.
         asset_spec_kwargs: Extra keyword arguments passed to every ``AssetSpec``, such
             as ``group_name`` or ``owners``.
+        job_asset_name: Last key component of the job asset. Defaults to
+            ``"workspace__fmw"``.
 
     Returns:
         The workspace and its asset specs.
@@ -139,4 +150,5 @@ def build_fme_assets(
         asset_list=table_specs,
         include_job_asset=include_job_asset,
         asset_spec_kwargs=asset_spec_kwargs,
+        job_asset_name=job_asset_name,
     )

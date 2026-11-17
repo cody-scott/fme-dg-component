@@ -88,3 +88,22 @@ def test_default_key_prefix_matches_builder(load_component_defs: Loader) -> None
         """
     )
     assert _asset_keys(defs) == {"fme/alpha__fmw/workspace__fmw", "fme/alpha__fmw/table_a"}
+
+
+def test_job_asset_name_from_yaml(load_component_defs: Loader) -> None:
+    defs = load_component_defs(
+        """
+        type: dagster_fme.FMEComponent
+        attributes:
+          fme_asset_specs:
+            - workspace: alpha.fmw
+              job_asset_name: run
+              asset_list: [table_a]
+            - workspace: beta.fmw
+        """
+    )
+    assert _asset_keys(defs) == {
+        "fme/alpha__fmw/run",
+        "fme/alpha__fmw/table_a",
+        "fme/beta__fmw/workspace__fmw",
+    }
