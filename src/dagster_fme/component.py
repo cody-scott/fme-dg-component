@@ -13,7 +13,7 @@ class FMEWorkspaceSpec(dg.Model):
     """One FME workspace and the downstream assets it produces."""
 
     workspace: str
-    key_prefix: list[str] = Field(default_factory=lambda: ["FME"])  # BUG-2
+    key_prefix: list[str] = Field(default_factory=lambda: ["fme"])
     asset_list: list[str] = Field(default_factory=list)
     include_job_asset: bool = True
 

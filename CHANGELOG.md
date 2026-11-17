@@ -28,3 +28,6 @@ monorepo. The entries below are changes from that module's behaviour.
 - **BUG-5**: Removed mutable default arguments. `FMEWorkspace` and `build_fme_assets` take
   `None` and normalise it, and copy the lists callers pass in. `FMEWorkspaceSpec` uses
   `Field(default_factory=...)`. Ruff `B006` is enforced with no suppressions.
+- **BUG-2 (breaking)**: The `FMEWorkspaceSpec.key_prefix` default is now `["fme"]`, the same as
+  `build_fme_assets`. It was `["FME"]`. YAML configs that relied on the default get asset keys
+  under `fme/...` instead of `FME/...`. To keep the old keys, set `key_prefix: [FME]`.
