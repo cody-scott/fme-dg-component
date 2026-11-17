@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 from collections.abc import Generator, Iterable, Mapping
+from contextlib import closing
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -145,73 +146,48 @@ class FMEResource(dg.ConfigurableResource):
         """The ``Authorization`` header for FME token auth."""
         return {"Authorization": f"fmetoken token={self.api_key}"}
 
-    def get_request(
-        self, client: httpx.Client, url: str, params: dict[str, Any] | None = None
-    ) -> httpx.Response:
-        """Send a GET request and raise on HTTP error status.
-
-        Args:
-            client: The client to send the request with.
-            url: Absolute URL to request.
-            params: Query parameters.
-
-        Returns:
-            The successful response.
-
-        Raises:
-            httpx.HTTPStatusError: If the response status is 4xx or 5xx.
-        """
-        response = client.get(url, params=params)
-        response.raise_for_status()
-        return response
-
     def request_offset_paginated(
-        self, endpoint: str, params: dict[str, Any] | None = None
-    ) -> Generator[httpx.Response, None, None]:
-        """Yield every page of an offset-paginated endpoint.
+        self, endpoint: str, params: Mapping[str, Any] | None = None
+    ) -> Generator[list[dict[str, Any]], None, None]:
+        """Yield the ``items`` of every page of an offset-paginated endpoint.
+
+        Pages hold ``page_size`` items and start at offset 0.
 
         Args:
             endpoint: Endpoint path relative to the API root, e.g. ``/jobs``.
-            params: Extra query parameters. ``limit`` overrides ``page_size`` and
-                ``offset`` sets the starting offset.
+            params: Extra query parameters.
 
         Yields:
-            One response per page.
+            The items of one page.
 
         Raises:
+            httpx.HTTPStatusError: If a response status is 4xx or 5xx.
             FMEPaginationLimitError: If more than ``max_pages`` pages would be needed.
         """
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
-
-        params = {} if params is None else params
-        limit = params.get("limit", self.page_size)
-        offset = params.get("offset", 0)
-
-        pages_fetched = 0
+        base_params = dict(params or {})
+        offset = 0
 
         with httpx.Client(headers=self.auth_header, timeout=self.timeout) as client:
-            while True:
-                if pages_fetched >= self.max_pages:
-                    raise FMEPaginationLimitError(
-                        f"{endpoint} needed more than max_pages={self.max_pages} pages of "
-                        f"{limit} items. Raise max_pages or page_size on the resource."
-                    )
-                pages_fetched += 1
-
-                request_params = params | {"limit": limit, "offset": offset}
-                response = self.get_request(client=client, url=url, params=request_params)
-
-                yield response
-
+            for _ in range(self.max_pages):
+                response = client.get(
+                    url, params=base_params | {"limit": self.page_size, "offset": offset}
+                )
+                response.raise_for_status()
                 body = response.json()
                 items = body.get("items") or []
+                yield items
+
                 total_count = int(body.get("totalCount", 0))
                 page_offset = int(body.get("offset", offset))
-
                 if not items or page_offset + len(items) >= total_count:
-                    break
+                    return
+                offset += self.page_size
 
-                offset += limit
+        raise FMEPaginationLimitError(
+            f"{endpoint} needed more than max_pages={self.max_pages} pages of "
+            f"{self.page_size} items. Raise max_pages or page_size on the resource."
+        )
 
     def get_latest_successful_jobs(
         self,
@@ -249,10 +225,11 @@ class FMEResource(dg.ConfigurableResource):
             "/jobs", params={"status": "success", "sort": JOBS_SORT}
         )
         try:
-            for page in pages:
-                scan.add_page(page.json().get("items") or [])
-                if scan.is_complete:
-                    break
+            with closing(pages):
+                for items in pages:
+                    scan.add_page(items)
+                    if scan.is_complete:
+                        break
         except FMEPaginationLimitError:
             if any(ws in scan.since for ws in scan.unresolved):
                 raise
@@ -262,7 +239,5 @@ class FMEResource(dg.ConfigurableResource):
                 self.max_pages,
                 ", ".join(sorted(scan.unresolved)),
             )
-        finally:
-            pages.close()
 
         return scan.found

@@ -36,17 +36,15 @@ def test_base_url_normalises_slashes() -> None:
     )
 
 
-def test_get_request_raises_on_http_error(
+def test_pagination_raises_on_http_error(
     respx_mock: respx.MockRouter, fme_resource: FMEResource
 ) -> None:
     respx_mock.get(JOBS_URL).mock(return_value=httpx.Response(401))
-    with httpx.Client() as client, pytest.raises(httpx.HTTPStatusError):
-        fme_resource.get_request(client, JOBS_URL)
+    with pytest.raises(httpx.HTTPStatusError):
+        list(fme_resource.request_offset_paginated("/jobs"))
 
 
-def test_pagination_sends_auth_and_yields_every_page(
-    respx_mock: respx.MockRouter, fme_resource: FMEResource
-) -> None:
+def test_pagination_sends_auth_and_yields_every_page(respx_mock: respx.MockRouter) -> None:
     def respond(request: httpx.Request) -> httpx.Response:
         offset = int(request.url.params["offset"])
         if offset == 0:
@@ -57,11 +55,10 @@ def test_pagination_sends_auth_and_yields_every_page(
 
     route = respx_mock.get(JOBS_URL).mock(side_effect=respond)
 
-    pages = list(
-        fme_resource.request_offset_paginated("/jobs", params={"status": "success", "limit": 2})
-    )
+    resource = FMEResource(host=HOST, api_key=API_KEY, page_size=2)
+    pages = list(resource.request_offset_paginated("/jobs", params={"status": "success"}))
 
-    items = [i["id"] for p in pages for i in p.json()["items"]]
+    items = [i["id"] for p in pages for i in p]
     assert items == [101, 102, 103]
     first = route.calls[0].request
     assert first.headers["Authorization"] == f"fmetoken token={API_KEY}"
@@ -80,13 +77,12 @@ def test_pagination_default_limit(respx_mock: respx.MockRouter, fme_resource: FM
     assert route.calls[0].request.url.params["offset"] == "0"
 
 
-def test_pagination_stops_without_extra_request(
-    respx_mock: respx.MockRouter, fme_resource: FMEResource
-) -> None:
+def test_pagination_stops_without_extra_request(respx_mock: respx.MockRouter) -> None:
     # 5 jobs at limit=2 is pages at offsets 0, 2, 4. A fourth request is wasted.
     route = respx_mock.get(JOBS_URL).mock(side_effect=jobs_responder("jobs_multiple_runs.json"))
-    pages = list(fme_resource.request_offset_paginated("/jobs", params={"limit": 2}))
-    assert sum(len(p.json()["items"]) for p in pages) == 5
+    resource = FMEResource(host=HOST, api_key=API_KEY, page_size=2)
+    pages = list(resource.request_offset_paginated("/jobs"))
+    assert sum(len(p) for p in pages) == 5
     assert route.call_count == 3
 
 
