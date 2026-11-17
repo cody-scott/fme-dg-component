@@ -18,6 +18,14 @@ monorepo. The entries below are changes from that module's behaviour.
   every successful job on every tick. When `max_pages` is reached, it raises
   `FMEPaginationLimitError` only if a workspace with a cursor is still unresolved. If only
   first-sight workspaces are left, it logs a warning and returns what it found.
+- `FMEComponent` can define its own `FMEResource`. Set `host` and `api_key` (plus optional
+  `page_size` and `max_pages`) and the component registers the resource under `resource_key`.
+  Leave both unset to use an external resource. Setting only one of `host`/`api_key`, or setting
+  `page_size`/`max_pages` without `host`, fails validation. Supply `api_key` with
+  `"{{ env('FME_API_KEY') }}"`, which fails if the variable is unset. Plain `{{ env.FME_API_KEY }}`
+  quietly resolves to nothing. The component keeps input values out of validation errors and
+  `api_key` out of its repr.
+- Constants `DEFAULT_PAGE_SIZE` and `DEFAULT_MAX_PAGES` in `dagster_fme.resource`.
 
 ### Changed
 

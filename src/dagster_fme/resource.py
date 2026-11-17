@@ -11,6 +11,12 @@ import dagster as dg
 import httpx
 from pydantic import Field
 
+DEFAULT_PAGE_SIZE = 1000
+"""Default items per page. FME Flow allows at most 1000."""
+
+DEFAULT_MAX_PAGES = 20
+"""Default cap on pages fetched by one paginated request."""
+
 JOBS_SORT = "timeFinished_desc"
 """Sort order requested from ``/jobs``, so the newest finish comes first."""
 
@@ -119,8 +125,8 @@ class FMEResource(dg.ConfigurableResource):
     api_key: str
     api_path: str = "/fmeapiv4"
     timeout: float = 30.0
-    page_size: int = Field(default=1000, ge=1, le=1000)
-    max_pages: int = Field(default=20, ge=1)
+    page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=1000)
+    max_pages: int = Field(default=DEFAULT_MAX_PAGES, ge=1)
 
     @property
     def base_url(self) -> str:
