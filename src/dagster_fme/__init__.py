@@ -2,11 +2,12 @@
 
 from dagster_fme.assets import FMEWorkspace, build_fme_assets
 from dagster_fme.component import FMEComponent, FMEWorkspaceSpec
-from dagster_fme.resource import FMEResource
+from dagster_fme.resource import FMEPaginationLimitError, FMEResource
 from dagster_fme.sensor import build_fme_sensor
 
 __all__ = [
     "FMEComponent",
+    "FMEPaginationLimitError",
     "FMEResource",
     "FMEWorkspace",
     "FMEWorkspaceSpec",

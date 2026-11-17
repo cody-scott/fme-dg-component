@@ -6,7 +6,7 @@ import httpx
 import pytest
 import respx
 
-from dagster_fme import FMEResource
+from dagster_fme import FMEPaginationLimitError, FMEResource
 from tests.helpers import API_KEY, HOST, JOBS_URL, jobs_responder, load_fixture
 
 
@@ -71,16 +71,21 @@ def test_pagination_stops_without_extra_request(
     assert route.call_count == 3
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BUG-7: page cap is hard-coded and raises a bare RecursionError"
-)
 def test_pagination_cap_is_configurable_with_clear_error(respx_mock: respx.MockRouter) -> None:
     respx_mock.get(JOBS_URL).mock(
         return_value=httpx.Response(
             200, json={"items": [{"id": 1}], "totalCount": 10_000, "offset": 0}
         )
     )
-    resource = FMEResource(host=HOST, api_key="k", page_size=1, max_pages=2)  # type: ignore[call-arg]
-    with pytest.raises(Exception, match="max_pages") as exc:
+    route = respx_mock.routes[0]
+    resource = FMEResource(host=HOST, api_key="k", page_size=1, max_pages=2)
+    with pytest.raises(FMEPaginationLimitError, match="max_pages=2"):
         list(resource.request_offset_paginated("/jobs"))
-    assert not isinstance(exc.value, RecursionError)
+    assert route.call_count == 2
+    assert route.calls[0].request.url.params["limit"] == "1"
+
+
+@pytest.mark.parametrize("kwargs", [{"page_size": 0}, {"page_size": 1001}, {"max_pages": 0}])
+def test_pagination_settings_are_validated(kwargs: dict[str, int]) -> None:
+    with pytest.raises(Exception, match=r"(?i)validation"):
+        FMEResource(host=HOST, api_key="k", **kwargs)  # pyright: ignore[reportArgumentType]
