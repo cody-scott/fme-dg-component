@@ -12,6 +12,22 @@ monorepo. The entries below are changes from that module's behaviour.
 
 - `job_asset_name` on `FMEWorkspaceSpec`, `build_fme_assets` and `FMEWorkspace` sets the last
   key component of the job asset. It defaults to `workspace__fmw`, so existing keys don't change.
+- `FMEResource.get_latest_successful_jobs(workspaces, since)` requests jobs newest first
+  (`status=success&sort=timeFinished_desc`). It stops paging once every workspace is found or
+  the scan has gone past that workspace's cursor time. The sensor uses it instead of fetching
+  every successful job on every tick. When `max_pages` is reached, it raises
+  `FMEPaginationLimitError` only if a workspace with a cursor is still unresolved. If only
+  first-sight workspaces are left, it logs a warning and returns what it found.
+
+### Changed
+
+- Successful jobs with no `workspace`, or with no `timeFinished` for a workspace that isn't
+  configured, are now skipped. Before, any such job anywhere in the history stopped the sensor.
+- `FMEResource.request_offset_paginated` is now typed as returning a `Generator`, so callers can
+  `close()` it after stopping early.
+- Removed the internal helpers `extract_jobs`, `get_fme_data` and `get_fme_states` from
+  `dagster_fme.sensor`. `parse_fme_time` moved to `dagster_fme.resource`, and `dagster_fme.sensor`
+  still imports it.
 
 ### Fixed
 
