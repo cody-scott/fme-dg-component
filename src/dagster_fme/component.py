@@ -9,6 +9,7 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from dagster_fme.assets import DEFAULT_JOB_ASSET_NAME, build_fme_assets
 from dagster_fme.resource import DEFAULT_MAX_PAGES, DEFAULT_PAGE_SIZE, FMEResource
+from dagster_fme.scaffolder import FMEComponentScaffolder
 from dagster_fme.sensor import build_fme_sensor
 
 
@@ -22,6 +23,7 @@ class FMEWorkspaceSpec(dg.Model):
     job_asset_name: str = DEFAULT_JOB_ASSET_NAME
 
 
+@dg.scaffold_with(FMEComponentScaffolder)
 class FMEComponent(dg.Component, dg.Model, dg.Resolvable):
     """Represent FME Flow workspaces as Dagster assets, with a sensor that materializes them.
 
