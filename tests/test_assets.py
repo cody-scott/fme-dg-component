@@ -61,3 +61,22 @@ def test_asset_spec_kwargs_reach_every_spec() -> None:
     for spec in ws.asset_specs:
         assert spec.group_name == "fme_group"
         assert list(spec.owners) == ["team:data"]
+
+
+def test_defaults_are_not_shared_between_calls() -> None:
+    first = build_fme_assets("alpha.fmw")
+    first_ws = FMEWorkspace("alpha.fmw")
+    first._asset_list.append(dg.AssetSpec("leak"))  # pyright: ignore[reportPrivateUsage]
+    first_ws._key_prefix.append("leak")  # pyright: ignore[reportPrivateUsage]
+
+    assert [s.key for s in build_fme_assets("beta.fmw").asset_specs] == [
+        dg.AssetKey(["fme", "beta__fmw", "workspace__fmw"])
+    ]
+    assert FMEWorkspace("beta.fmw").job_asset_spec.key == dg.AssetKey(["fme", "workspace__fmw"])
+
+
+def test_caller_lists_are_copied() -> None:
+    prefix = ["fme"]
+    ws = FMEWorkspace("alpha.fmw", key_prefix=prefix)
+    prefix.append("mutated")
+    assert ws.job_asset_spec.key == dg.AssetKey(["fme", "workspace__fmw"])

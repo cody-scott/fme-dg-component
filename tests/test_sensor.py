@@ -14,6 +14,7 @@ import respx
 import dagster_fme.sensor as sensor_module
 from dagster_fme import FMEResource, FMEWorkspace, build_fme_assets, build_fme_sensor
 from dagster_fme.sensor import (
+    build_materialization_metadata,
     evaluate_jobs,
     get_latest_time_for_responses,
     parse_cursor,
@@ -48,8 +49,7 @@ def _run_sensor(
     )
     result = sensor(context)
     assert isinstance(result, dg.SensorResult)
-    # Phase 2 still persists via update_cursor (BUG-1), so read it back from the context.
-    return result, parse_cursor(context.cursor)
+    return result, parse_cursor(result.cursor)
 
 
 # --- pure helpers ---------------------------------------------------------------------
@@ -91,6 +91,13 @@ def test_latest_time_parses_z_suffix() -> None:
 def test_latest_time_raises_on_missing_fields(fixture: str, match: str) -> None:
     with pytest.raises(ValueError, match=match):
         get_latest_time_for_responses(_items(fixture))
+
+
+def test_evaluate_carries_forward_configured_and_drops_unconfigured() -> None:
+    prior = {"alpha.fmw": "2026-01-01T00:00:00+00:00", "removed.fmw": "2026-01-01T00:00:00+00:00"}
+    events, cursor = evaluate_jobs(prior, {}, _workspaces())
+    assert events == []
+    assert cursor == {"alpha.fmw": "2026-01-01T00:00:00+00:00"}
 
 
 def test_evaluate_first_sight_is_baseline_only() -> None:
@@ -158,7 +165,7 @@ def test_sensor_ignores_unconfigured_workspaces(
     result = sensor(context)
     assert isinstance(result, dg.SensorResult)
     assert result.asset_events == []
-    assert "gamma-export.fmw" not in parse_cursor(context.cursor)
+    assert "gamma-export.fmw" not in parse_cursor(result.cursor)
 
 
 def test_sensor_definition_settings() -> None:
@@ -171,9 +178,6 @@ def test_sensor_definition_settings() -> None:
 # --- known bugs (fixed in Phase 3) ----------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BUG-1: workspaces missing from the response lose their cursor"
-)
 def test_sensor_carries_forward_unseen_workspaces(
     respx_mock: respx.MockRouter, fme_resource: FMEResource
 ) -> None:
@@ -187,7 +191,6 @@ def test_sensor_carries_forward_unseen_workspaces(
     assert json.loads(result.cursor) == prior
 
 
-@pytest.mark.xfail(strict=True, reason="BUG-3: raw job dict passed as materialization metadata")
 def test_materialization_metadata_is_typed() -> None:
     latest = get_latest_time_for_responses(_items("jobs_page_1.json"))
     events, _ = evaluate_jobs(
@@ -201,8 +204,27 @@ def test_materialization_metadata_is_typed() -> None:
     assert isinstance(md["time_started"], dg.TimestampMetadataValue)
     assert isinstance(md["time_finished"], dg.TimestampMetadataValue)
     assert isinstance(md["fme_job"], dg.JsonMetadataValue)
+    assert md["time_finished"].value == datetime.datetime(2026, 1, 2, 10, 5, tzinfo=UTC).timestamp()
+    # elapsedTime is 60000 ms in the fixture.
+    assert md["duration_seconds"] == dg.MetadataValue.float(60.0)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG-9: sensor reads resources.original_resource_dict")
+def test_metadata_duration_falls_back_to_start_and_finish() -> None:
+    md = build_materialization_metadata(
+        {
+            "id": 7,
+            "timeStarted": "2026-01-02T10:00:00Z",
+            "timeFinished": "2026-01-02T10:05:00+00:00",
+        }
+    )
+    assert md["duration_seconds"] == dg.MetadataValue.float(300.0)
+    assert "workspace" not in md
+
+
+def test_metadata_omits_missing_fields() -> None:
+    md = build_materialization_metadata({"workspace": "alpha.fmw"})
+    assert set(md) == {"workspace", "fme_job"}
+
+
 def test_sensor_uses_public_resource_access() -> None:
     assert "original_resource_dict" not in inspect.getsource(sensor_module)

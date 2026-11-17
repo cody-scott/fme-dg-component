@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 import dagster as dg
+from pydantic import Field, field_validator
 
 from dagster_fme.assets import build_fme_assets
 from dagster_fme.sensor import build_fme_sensor
@@ -12,17 +15,35 @@ class FMEWorkspaceSpec(dg.Model):
     """One FME workspace and the downstream assets it produces."""
 
     workspace: str
-    key_prefix: list[str] = ["FME"]  # noqa: RUF012  BUG-2 (and see BUG-5)
-    asset_list: list[str] = []  # noqa: RUF012  BUG-5
+    key_prefix: list[str] = Field(default_factory=lambda: ["fme"])
+    asset_list: list[str] = Field(default_factory=list)
     include_job_asset: bool = True
 
 
 class FMEComponent(dg.Component, dg.Model, dg.Resolvable):
-    """Component for connecting to FME jobs"""
+    """Represent FME Flow workspaces as Dagster assets, with a sensor that materializes them.
+
+    Each entry in ``fme_asset_specs`` becomes a job asset plus its downstream assets. The
+    sensor watches FME Flow for successful jobs through the ``FMEResource`` registered
+    under ``resource_key``.
+    """
 
     resource_key: str = "fme"
 
     fme_asset_specs: list[FMEWorkspaceSpec]
+
+    @field_validator("fme_asset_specs")
+    @classmethod
+    def _workspaces_are_unique(cls, specs: list[FMEWorkspaceSpec]) -> list[FMEWorkspaceSpec]:
+        """Reject specs that share a workspace, since the sensor matches on that name."""
+        counts = Counter(spec.workspace for spec in specs)
+        duplicates = sorted(ws for ws, n in counts.items() if n > 1)
+        if duplicates:
+            raise ValueError(
+                f"Duplicate workspace(s) in fme_asset_specs: {', '.join(duplicates)}. "
+                "Each FME workspace may appear only once."
+            )
+        return specs
 
     build_sensor: bool = True
     sensor_name: str = "fme_sensor"

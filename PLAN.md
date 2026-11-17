@@ -1,6 +1,6 @@
 # PLAN.md: Rebuild `fme/` into the `dagster-fme` uv package
 
-Status: **in progress** (Phases 0–2 done). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
+Status: **in progress** (Phases 0–3 done). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
 
 ## Goal
 
@@ -113,16 +113,25 @@ This phase only moves and decouples the code. It doesn't fix bugs, except where 
 
 Do one bug per commit. In each commit, remove that bug's xfail marker so it becomes a passing test.
 
-- [ ] BUG-1: cursor carry-forward, returned via `SensorResult(cursor=...)`.
-- [ ] BUG-2: unified default `key_prefix=["fme"]`.
-- [ ] BUG-3: typed materialization metadata.
-- [ ] BUG-4: pagination termination with no extra request (assert on the respx call count).
-- [ ] BUG-5: no mutable defaults (also enable ruff `B006`).
-- [ ] BUG-6: rewritten docstrings.
-- [ ] BUG-7: configurable `page_size` / `max_pages`, and a clear error type when the cap is hit.
-- [ ] BUG-8: duplicate-workspace validation in the component.
-- [ ] BUG-9: public resource access in the sensor.
-- [ ] Record each fix in `CHANGELOG.md` under `0.1.0`.
+- [x] BUG-1: cursor carry-forward, returned via `SensorResult(cursor=...)`.
+- [x] BUG-2: unified default `key_prefix=["fme"]`.
+- [x] BUG-3: typed materialization metadata.
+- [x] BUG-4: pagination termination with no extra request (assert on the respx call count).
+- [x] BUG-5: no mutable defaults (also enable ruff `B006`).
+- [x] BUG-6: rewritten docstrings.
+- [x] BUG-7: configurable `page_size` / `max_pages`, and a clear error type when the cap is hit.
+- [x] BUG-8: duplicate-workspace validation in the component.
+- [x] BUG-9: public resource access in the sensor.
+- [x] Record each fix in `CHANGELOG.md` under `0.1.0`.
+- [x] Notes from the fixes:
+  - BUG-1: the carry-forward covers **configured** workspaces only. Cursor entries for workspaces that are no longer
+    configured are dropped, as the pre-existing `test_sensor_ignores_unconfigured_workspaces` already pinned.
+  - BUG-3: the duration key is `duration_seconds` (float), taken from `elapsedTime` (ms) and falling back to finish
+    minus start. The new pure helper `build_materialization_metadata` builds the metadata.
+  - BUG-7: `page_size` (1–1000, default 1000) and `max_pages` (≥1, default 20). An explicit `limit` in `params`
+    still overrides `page_size`. `FMEPaginationLimitError` (a `RuntimeError`) is exported.
+  - BUG-8: Dagster wraps the validator's `ValueError`, so the test searches the exception chain for the message.
+  - Gate: 47 tests, 100% line and branch coverage, `lowest-direct` (dagster 1.11.0) passes.
 
 ## Phase 4: Feature changes
 

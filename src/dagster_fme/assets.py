@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 import dagster as dg
@@ -24,24 +25,30 @@ class FMEWorkspace:
     def __init__(
         self,
         workspace: str,
-        key_prefix: list[str] = ["fme"],  # noqa: B006  BUG-5
-        asset_list: list[dg.AssetSpec] = [],  # noqa: B006  BUG-5
+        key_prefix: Sequence[str] | None = None,
+        asset_list: Sequence[dg.AssetSpec] | None = None,
         include_job_asset: bool = True,
         asset_spec_kwargs: dict[str, Any] | None = None,
     ) -> None:
-        """Create an asset representing a FME job.
+        """Bundle an FME workspace with the asset specs it produces.
+
+        Most callers should use ``build_fme_assets``, which builds the child specs and
+        nests their keys under the workspace.
 
         Args:
-            workspace: name of job
-            key_prefix: key prefixes to pass to AssetSpec. Defaults to ["fme"].
-            asset_list: List of assets associated with the package. Defaults to [].
-            include_job_asset: Should the `asset_specs` property include an asset for the
-                package itself. Defaults to True.
-            asset_spec_kwargs: Parameters to pass to AssetSpec
+            workspace: Raw FME workspace name, exactly as the FME API reports it.
+            key_prefix: Key prefix for the job asset, which is keyed
+                ``key_prefix + ["workspace__fmw"]``. Defaults to ``["fme"]``.
+            asset_list: Specs for the downstream assets the workspace produces.
+                Defaults to none.
+            include_job_asset: Whether ``asset_specs`` includes the asset for the
+                workspace itself. Defaults to True.
+            asset_spec_kwargs: Extra keyword arguments for the job asset's ``AssetSpec``,
+                such as ``group_name`` or ``owners``.
         """
         self._workspace = workspace
-        self._key_prefix = key_prefix
-        self._asset_list = asset_list
+        self._key_prefix = list(key_prefix) if key_prefix is not None else ["fme"]
+        self._asset_list = list(asset_list) if asset_list is not None else []
         self._include_job_asset = include_job_asset
         self._asset_spec_kwargs = asset_spec_kwargs if asset_spec_kwargs is not None else {}
 
@@ -80,11 +87,9 @@ class FMEWorkspace:
 
     @property
     def asset_specs(self) -> list[dg.AssetSpec]:
-        """
-        Returns the list of asset specs for the Job Asset.
+        """All asset specs for this workspace: the job asset, then the child assets.
 
-        If include_job_asset is set to false on creation,
-        the asset representing the job itself is not included.
+        The job asset is left out when ``include_job_asset`` is False.
         """
         base_asset = [self.job_asset_spec] if self._include_job_asset else []
         return base_asset + self._asset_list
@@ -92,16 +97,33 @@ class FMEWorkspace:
 
 def build_fme_assets(
     workspace: str,
-    key_prefix: list[str] = ["fme"],  # noqa: B006  BUG-5
-    asset_list: list[str] = [],  # noqa: B006  BUG-5
+    key_prefix: Sequence[str] | None = None,
+    asset_list: Sequence[str] | None = None,
     include_job_asset: bool = True,
     asset_spec_kwargs: dict[str, Any] | None = None,
 ) -> FMEWorkspace:
+    """Build the asset specs for one FME workspace.
+
+    Every asset is nested under the cleaned workspace name. The job asset is keyed
+    ``key_prefix + [clean_workspace(workspace), "workspace__fmw"]`` and each child asset
+    ``key_prefix + [clean_workspace(workspace), asset]``. The sensor materializes all of
+    them when a newer successful job for the workspace finishes.
+
+    Args:
+        workspace: Raw FME workspace name, exactly as the FME API reports it.
+        key_prefix: Leading key components. Defaults to ``["fme"]``.
+        asset_list: Names of the downstream assets (e.g. tables) the workspace writes.
+            Defaults to none.
+        include_job_asset: Whether to include an asset for the workspace itself.
+            Defaults to True.
+        asset_spec_kwargs: Extra keyword arguments passed to every ``AssetSpec``, such
+            as ``group_name`` or ``owners``.
+
+    Returns:
+        The workspace and its asset specs.
     """
-    Construct a MSSQLJob asset, and bundle together the list of assets provided.
-    This places the assets in `asset_list` within the key structure
-    of the job asset to allow it to check for events.
-    """
+    key_prefix = ["fme"] if key_prefix is None else key_prefix
+    asset_list = [] if asset_list is None else asset_list
     clean_workspace = FMEWorkspace.clean_workspace(workspace)
 
     base_key = [*key_prefix, clean_workspace]

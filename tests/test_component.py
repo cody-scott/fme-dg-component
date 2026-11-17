@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 import dagster as dg
@@ -50,14 +51,12 @@ def test_component_loads_from_yaml(load_component_defs: Loader) -> None:
     assert sensor.required_resource_keys == {"fme"}
 
 
-@pytest.mark.xfail(strict=True, reason="BUG-2: component default key_prefix is ['FME']")
 def test_default_key_prefix_is_lowercase_fme() -> None:
     assert FMEWorkspaceSpec(workspace="alpha.fmw").key_prefix == ["fme"]
 
 
-@pytest.mark.xfail(strict=True, reason="BUG-8: duplicate workspaces silently overwrite")
 def test_duplicate_workspaces_are_rejected(load_component_defs: Loader) -> None:
-    with pytest.raises(Exception, match=r"(?i)duplicate"):
+    with pytest.raises(Exception) as exc:
         load_component_defs(
             """
             type: dagster_fme.FMEComponent
@@ -67,3 +66,25 @@ def test_duplicate_workspaces_are_rejected(load_component_defs: Loader) -> None:
                 - workspace: alpha.fmw
             """
         )
+    # Dagster wraps the validation error, so search the whole exception chain.
+    messages: list[str] = []
+    err: BaseException | None = exc.value
+    while err is not None:
+        messages.append(str(err))
+        err = err.__cause__ or err.__context__
+    assert re.search(
+        r"Duplicate workspace\(s\) in fme_asset_specs: alpha\.fmw", "\n".join(messages)
+    )
+
+
+def test_default_key_prefix_matches_builder(load_component_defs: Loader) -> None:
+    defs = load_component_defs(
+        """
+        type: dagster_fme.FMEComponent
+        attributes:
+          fme_asset_specs:
+            - workspace: alpha.fmw
+              asset_list: [table_a]
+        """
+    )
+    assert _asset_keys(defs) == {"fme/alpha__fmw/workspace__fmw", "fme/alpha__fmw/table_a"}

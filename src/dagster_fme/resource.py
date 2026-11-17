@@ -7,6 +7,11 @@ from typing import Any
 
 import dagster as dg
 import httpx
+from pydantic import Field
+
+
+class FMEPaginationLimitError(RuntimeError):
+    """Raised when an offset-paginated request needs more than ``max_pages`` pages."""
 
 
 class FMEResource(dg.ConfigurableResource):
@@ -17,12 +22,16 @@ class FMEResource(dg.ConfigurableResource):
         api_key: FME Flow API token. Treat as a secret; supply via env templating.
         api_path: Path of the v4 REST API relative to ``host``.
         timeout: Request timeout in seconds.
+        page_size: Items requested per page (FME Flow allows 1 to 1000).
+        max_pages: Maximum pages fetched by one paginated request before giving up.
     """
 
     host: str
     api_key: str
     api_path: str = "/fmeapiv4"
     timeout: float = 30.0
+    page_size: int = Field(default=1000, ge=1, le=1000)
+    max_pages: int = Field(default=20, ge=1)
 
     @property
     def base_url(self) -> str:
@@ -61,42 +70,43 @@ class FMEResource(dg.ConfigurableResource):
 
         Args:
             endpoint: Endpoint path relative to the API root, e.g. ``/jobs``.
-            params: Extra query parameters. ``limit`` and ``offset`` set the page
-                size and starting offset.
+            params: Extra query parameters. ``limit`` overrides ``page_size`` and
+                ``offset`` sets the starting offset.
 
         Yields:
             One response per page.
 
         Raises:
-            RecursionError: If more than 20 pages are requested.
+            FMEPaginationLimitError: If more than ``max_pages`` pages would be needed.
         """
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
 
         params = {} if params is None else params
-        limit = params.get("limit", 1000)
+        limit = params.get("limit", self.page_size)
         offset = params.get("offset", 0)
 
-        # BUG-7: hard-coded page cap, ported as-is.
-        current_depth = 0
-        max_depth = 20
+        pages_fetched = 0
 
         with httpx.Client(headers=self.auth_header, timeout=self.timeout) as client:
             while True:
-                current_depth += 1
-                if current_depth > max_depth:
-                    raise RecursionError("Depth exceeded")
+                if pages_fetched >= self.max_pages:
+                    raise FMEPaginationLimitError(
+                        f"{endpoint} needed more than max_pages={self.max_pages} pages of "
+                        f"{limit} items. Raise max_pages or page_size on the resource."
+                    )
+                pages_fetched += 1
 
                 request_params = params | {"limit": limit, "offset": offset}
                 response = self.get_request(client=client, url=url, params=request_params)
 
                 yield response
 
-                # BUG-4: stops on the response offset, so always makes one extra request.
-                j = response.json()
-                response_tc = int(j.get("totalCount", 0))
-                response_o = int(j.get("offset", 0))
+                body = response.json()
+                items = body.get("items") or []
+                total_count = int(body.get("totalCount", 0))
+                page_offset = int(body.get("offset", offset))
+
+                if not items or page_offset + len(items) >= total_count:
+                    break
 
                 offset += limit
-
-                if response_o >= response_tc:
-                    break
