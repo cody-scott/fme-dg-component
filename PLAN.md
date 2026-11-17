@@ -1,6 +1,6 @@
 # PLAN.md: Rebuild `fme/` into the `dagster-fme` uv package
 
-Status: **in progress** (Phases 0–5 done). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
+Status: **in progress** (Phases 0–5 done, Phase 6 awaiting review). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
 
 ## Goal
 
@@ -200,14 +200,22 @@ Do one bug per commit. In each commit, remove that bug's xfail marker so it beco
 
 ## Phase 6: Docs and cleanup
 
-- [ ] `README.md`: what the package does, install from git, a YAML example (external resource and
+- [x] `README.md`: what the package does, install from git, a YAML example (external resource and
       in-component resource), a Python API example, an asset key diagram, how the cursor and baseline work,
       and the dev commands.
-- [ ] Component docstring and field descriptions (`Field(description=...)`), so `dg` shows useful help.
-- [ ] Delete the original `fme/` directory.
-- [ ] Final gate: `uv run pre-commit run --all-files`, pytest coverage of at least 90%, and the lowest-direct job passes.
-- [ ] Commit: `Phase 6: docs, remove legacy fme module`.
+- [x] Component docstring and field descriptions (`Field(description=...)`), so `dg` shows useful help.
+- [x] Delete the original `fme/` directory.
+- [x] Final gate: `uv run pre-commit run --all-files`, pytest coverage of at least 90%, and the lowest-direct job passes.
+- [x] Commit: `Phase 6: docs, remove legacy fme module`.
 - [ ] Ask the user before pushing the `phase-6/...` branch or opening its PR.
+- [x] Notes from Phase 6:
+  - When Dagster derives the YAML model for a `Resolvable` component, it overwrites
+    `Field(description=...)` with the resolver's description (None) on every field that has a default.
+    Component fields therefore carry their help through `Annotated[T, dg.Resolver.default(description=...)]`
+    (the `_doc` helper), which works on 1.11.0 and 1.13. `FMEWorkspaceSpec` is a plain `dg.Model`, so
+    `Field(description=...)` works there. A test checks that every YAML field has a description.
+  - Closed the Phase 4 follow-up: `FMEResource.api_key` is `repr=False`.
+  - Removed the `fme/` excludes from ruff config and pre-commit along with the directory.
 
 ---
 

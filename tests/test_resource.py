@@ -23,6 +23,12 @@ from tests.helpers import (
 )
 
 
+def test_api_key_not_in_repr() -> None:
+    resource = FMEResource(host=HOST, api_key="s3cret-token")
+    assert "s3cret-token" not in repr(resource)
+    assert "s3cret-token" not in str(resource)
+
+
 def test_base_url_normalises_slashes() -> None:
     assert FMEResource(host=f"{HOST}/", api_key="k").base_url == f"{HOST}/fmeapiv4"
     assert FMEResource(host=HOST, api_key="k", api_path="fmeapiv4/").base_url == (

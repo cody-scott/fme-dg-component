@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from typing import Annotated
 
 import dagster as dg
 from pydantic import ConfigDict, Field, field_validator, model_validator
@@ -16,11 +17,40 @@ from dagster_fme.sensor import build_fme_sensor
 class FMEWorkspaceSpec(dg.Model):
     """One FME workspace and the downstream assets it produces."""
 
-    workspace: str
-    key_prefix: list[str] = Field(default_factory=lambda: ["fme"])
-    asset_list: list[str] = Field(default_factory=list)
-    include_job_asset: bool = True
-    job_asset_name: str = DEFAULT_JOB_ASSET_NAME
+    workspace: str = Field(
+        description=(
+            "FME workspace name exactly as FME Flow reports it in /jobs, e.g. "
+            "'load_parcels.fmw'. The sensor matches on this raw name."
+        )
+    )
+    key_prefix: list[str] = Field(
+        default_factory=lambda: ["fme"],
+        description="Leading asset key components. Assets are keyed under "
+        "key_prefix + [<cleaned workspace>].",
+    )
+    asset_list: list[str] = Field(
+        default_factory=list,
+        description="Names of the downstream assets (e.g. tables) the workspace writes. "
+        "Each becomes key_prefix + [<cleaned workspace>, <name>].",
+    )
+    include_job_asset: bool = Field(
+        default=True,
+        description="Whether to add an asset for the workspace itself, keyed "
+        "key_prefix + [<cleaned workspace>, job_asset_name].",
+    )
+    job_asset_name: str = Field(
+        default=DEFAULT_JOB_ASSET_NAME,
+        description="Last key component of the workspace's own asset.",
+    )
+
+
+def _doc(description: str) -> dg.Resolver:
+    """Attach a description that ``dg`` shows for a component field.
+
+    ``Field(description=...)`` is dropped for fields with a default when Dagster derives
+    the YAML model, so component fields carry their description on the resolver instead.
+    """
+    return dg.Resolver.default(description=description)
 
 
 @dg.scaffold_with(FMEComponentScaffolder)
@@ -38,14 +68,47 @@ class FMEComponent(dg.Component, dg.Model, dg.Resolvable):
     # Keep resolved values (such as an env-templated api_key) out of validation errors.
     model_config = ConfigDict(hide_input_in_errors=True)
 
-    resource_key: str = "fme"
+    resource_key: Annotated[
+        str,
+        _doc(
+            "Key of the FMEResource the sensor uses. The component registers its own "
+            "resource under this key when host and api_key are set."
+        ),
+    ] = "fme"
 
-    host: str | None = None
-    api_key: str | None = Field(default=None, repr=False)
-    page_size: int | None = Field(default=None, ge=1, le=1000)
-    max_pages: int | None = Field(default=None, ge=1)
+    host: Annotated[
+        str | None,
+        _doc(
+            "FME Flow base URL, e.g. https://fme.example.com. Set it together with api_key "
+            "to define the resource in this component."
+        ),
+    ] = None
+    api_key: Annotated[
+        str | None,
+        _doc(
+            "FME Flow API token. Supply it with \"{{ env('FME_API_KEY') }}\" and never write "
+            "the token into YAML."
+        ),
+    ] = Field(default=None, repr=False)
+    page_size: Annotated[
+        int | None,
+        _doc(
+            f"Jobs requested per page, 1 to 1000 (default {DEFAULT_PAGE_SIZE}). Only valid "
+            "with host and api_key."
+        ),
+    ] = Field(default=None, ge=1, le=1000)
+    max_pages: Annotated[
+        int | None,
+        _doc(
+            f"Page cap for one job scan (default {DEFAULT_MAX_PAGES}). Only valid with host "
+            "and api_key."
+        ),
+    ] = Field(default=None, ge=1)
 
-    fme_asset_specs: list[FMEWorkspaceSpec]
+    fme_asset_specs: Annotated[
+        list[FMEWorkspaceSpec],
+        _doc("The FME workspaces to represent. Each workspace may appear only once."),
+    ]
 
     @field_validator("fme_asset_specs")
     @classmethod
@@ -60,9 +123,11 @@ class FMEComponent(dg.Component, dg.Model, dg.Resolvable):
             )
         return specs
 
-    build_sensor: bool = True
-    sensor_name: str = "fme_sensor"
-    sensor_check_minutes: int = 30
+    build_sensor: Annotated[
+        bool, _doc("Whether to build the sensor that materializes assets from successful jobs.")
+    ] = True
+    sensor_name: Annotated[str, _doc("Name of the sensor.")] = "fme_sensor"
+    sensor_check_minutes: Annotated[int, _doc("Minimum minutes between sensor ticks.")] = 30
 
     @model_validator(mode="after")
     def _resource_settings_are_consistent(self) -> FMEComponent:
