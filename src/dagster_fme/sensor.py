@@ -191,10 +191,21 @@ def build_fme_sensor(
     fme_resource_key: str,
     minimum_interval_seconds: int = 60,
 ) -> dg.SensorDefinition:
-    """
-    Return a sensor that checks for the status of FME packages
-    Sensor will return materialization events for the assets defined in
-    `FMEAsset.asset_list`
+    """Build a sensor that materializes FME workspace assets from successful jobs.
+
+    On each tick the sensor fetches successful jobs from FME Flow and finds the latest
+    finish per workspace. A workspace's first finish is recorded in the cursor as a
+    baseline and emits nothing. A strictly newer finish emits an ``AssetMaterialization``
+    for every asset spec of that workspace.
+
+    Args:
+        fme_assets: The workspaces to watch.
+        sensor_name: Name of the sensor definition.
+        fme_resource_key: Resource key of the ``FMEResource`` to query.
+        minimum_interval_seconds: Minimum time between sensor ticks.
+
+    Returns:
+        The sensor definition.
     """
 
     @dg.sensor(
@@ -203,8 +214,9 @@ def build_fme_sensor(
         required_resource_keys={fme_resource_key},
     )
     def _sensor(context: dg.SensorEvaluationContext, **_resources: Any) -> dg.SensorResult:
-        """
-        cursor will be fqn of the ssis package + last runtime
+        """Materialize workspaces with newer jobs and advance the cursor.
+
+        The cursor is JSON ``{"<workspace>": "<ISO-8601 timeFinished>"}``.
         """
         # `**_resources` absorbs the resources Dagster passes as kwargs when the sensor
         # is invoked directly (`sensor(context)`); the resource is read from `context`.

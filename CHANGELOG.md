@@ -34,3 +34,5 @@ monorepo. The entries below are changes from that module's behaviour.
 - **BUG-8**: `FMEComponent` rejects `fme_asset_specs` entries that repeat a `workspace`, and the
   error names the duplicates. Before, a later spec silently replaced an earlier one in the
   sensor's lookup.
+- **BUG-6**: Rewrote leftover SSIS/MSSQL docstrings in Google style for FME. A test guards
+  against the old wording coming back.

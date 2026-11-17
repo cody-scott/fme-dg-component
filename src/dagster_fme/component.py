@@ -21,7 +21,12 @@ class FMEWorkspaceSpec(dg.Model):
 
 
 class FMEComponent(dg.Component, dg.Model, dg.Resolvable):
-    """Component for connecting to FME jobs"""
+    """Represent FME Flow workspaces as Dagster assets, with a sensor that materializes them.
+
+    Each entry in ``fme_asset_specs`` becomes a job asset plus its downstream assets. The
+    sensor watches FME Flow for successful jobs through the ``FMEResource`` registered
+    under ``resource_key``.
+    """
 
     resource_key: str = "fme"
 
