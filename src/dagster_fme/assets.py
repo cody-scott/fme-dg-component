@@ -11,6 +11,9 @@ import dagster as dg
 DEFAULT_JOB_ASSET_NAME = "workspace__fmw"
 """Default last key component of a workspace's job asset."""
 
+DEFAULT_KEY_PREFIX: tuple[str, ...] = ("fme",)
+"""Default leading asset key components."""
+
 
 class FMEWorkspace:
     """An FME workspace and the asset specs that represent it.
@@ -54,7 +57,7 @@ class FMEWorkspace:
                 ``"workspace__fmw"``.
         """
         self._workspace = workspace
-        self._key_prefix = list(key_prefix) if key_prefix is not None else ["fme"]
+        self._key_prefix = list(key_prefix if key_prefix is not None else DEFAULT_KEY_PREFIX)
         self._asset_list = list(asset_list) if asset_list is not None else []
         self._include_job_asset = include_job_asset
         self._asset_spec_kwargs = asset_spec_kwargs if asset_spec_kwargs is not None else {}
@@ -88,9 +91,7 @@ class FMEWorkspace:
         """The spec for the asset that represents the workspace itself."""
         key = [*self._key_prefix, self._job_asset_name]
         spec_args: dict[str, Any] = self._asset_spec_kwargs | {"key": key}
-        desc = f"""
-        This is the asset that represents the workspace `{self._workspace}`.
-        """
+        desc = f"The asset that represents the FME workspace `{self._workspace}`."
         return dg.AssetSpec(**spec_args, description=desc)
 
     @property
@@ -133,7 +134,7 @@ def build_fme_assets(
     Returns:
         The workspace and its asset specs.
     """
-    key_prefix = ["fme"] if key_prefix is None else key_prefix
+    key_prefix = DEFAULT_KEY_PREFIX if key_prefix is None else key_prefix
     asset_list = [] if asset_list is None else asset_list
     clean_workspace = FMEWorkspace.clean_workspace(workspace)
 
