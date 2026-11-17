@@ -28,6 +28,7 @@ class FMEWorkspace:
     _include_job_asset: bool
     _asset_spec_kwargs: dict[str, Any]
     _job_asset_name: str
+    _repository: str | None
 
     def __init__(
         self,
@@ -37,6 +38,7 @@ class FMEWorkspace:
         include_job_asset: bool = True,
         asset_spec_kwargs: dict[str, Any] | None = None,
         job_asset_name: str = DEFAULT_JOB_ASSET_NAME,
+        repository: str | None = None,
     ) -> None:
         """Bundle an FME workspace with the asset specs it produces.
 
@@ -55,6 +57,9 @@ class FMEWorkspace:
                 such as ``group_name`` or ``owners``.
             job_asset_name: Last key component of the job asset. Defaults to
                 ``"workspace__fmw"``.
+            repository: FME Flow repository that holds the workspace. When set, the
+                sensor looks the workspace up with one direct request instead of the
+                shared job scan. Defaults to None.
         """
         self._workspace = workspace
         self._key_prefix = list(key_prefix if key_prefix is not None else DEFAULT_KEY_PREFIX)
@@ -62,11 +67,17 @@ class FMEWorkspace:
         self._include_job_asset = include_job_asset
         self._asset_spec_kwargs = asset_spec_kwargs if asset_spec_kwargs is not None else {}
         self._job_asset_name = job_asset_name
+        self._repository = repository
 
     @property
     def workspace(self) -> str:
         """The raw FME workspace name, as reported by the FME API."""
         return self._workspace
+
+    @property
+    def repository(self) -> str | None:
+        """The FME Flow repository, if set, used to look the workspace up directly."""
+        return self._repository
 
     @property
     def fqn(self) -> str:
@@ -112,6 +123,7 @@ def build_fme_assets(
     include_job_asset: bool = True,
     asset_spec_kwargs: dict[str, Any] | None = None,
     job_asset_name: str = DEFAULT_JOB_ASSET_NAME,
+    repository: str | None = None,
 ) -> FMEWorkspace:
     """Build the asset specs for one FME workspace.
 
@@ -131,6 +143,9 @@ def build_fme_assets(
             as ``group_name`` or ``owners``.
         job_asset_name: Last key component of the job asset. Defaults to
             ``"workspace__fmw"``.
+        repository: FME Flow repository that holds the workspace. When set, the sensor
+            looks the workspace up with one direct request instead of the shared job
+            scan. It doesn't change asset keys or the cursor.
 
     Returns:
         The workspace and its asset specs.
@@ -153,4 +168,5 @@ def build_fme_assets(
         include_job_asset=include_job_asset,
         asset_spec_kwargs=asset_spec_kwargs,
         job_asset_name=job_asset_name,
+        repository=repository,
     )

@@ -8,6 +8,7 @@ import json
 from typing import Any
 
 import dagster as dg
+import httpx
 import pytest
 import respx
 
@@ -20,7 +21,7 @@ from dagster_fme.sensor import (
     evaluate_jobs,
     load_cursor,
 )
-from tests.helpers import JOBS_URL, jobs_responder, load_fixture
+from tests.helpers import JOBS_URL, items_responder, jobs_responder, load_fixture, make_job
 
 UTC = datetime.timezone.utc
 
@@ -196,7 +197,85 @@ def test_sensor_carries_forward_unseen_workspaces(
     result = sensor(context)
     assert isinstance(result, dg.SensorResult)
     assert result.cursor is not None
-    assert json.loads(result.cursor) == prior
+    cursor = json.loads(result.cursor)
+    # alpha keeps its entry (BUG-1). Beta was never seen, so it gets a baseline (N-3).
+    assert cursor["alpha.fmw"] == prior["alpha.fmw"]
+    assert cursor["Beta Load.fmw"] == "2026-01-02T12:30:00+00:00"
+
+
+def test_evaluate_applies_baselines_only_to_first_sight() -> None:
+    baseline = _dt("2026-02-01T00:00:00+00:00")
+    prior = {"alpha.fmw": _dt("2026-01-01T00:00:00+00:00")}
+    events, cursor = evaluate_jobs(
+        prior, {}, _workspaces(), {"alpha.fmw": baseline, "Beta Load.fmw": baseline}
+    )
+    assert events == []
+    assert cursor == {"alpha.fmw": prior["alpha.fmw"], "Beta Load.fmw": baseline}
+
+
+def test_sensor_job_after_baseline_emits(
+    respx_mock: respx.MockRouter, fme_resource: FMEResource
+) -> None:
+    # N-3: a workspace baselined without ever being found emits on its first real job.
+    sensor = build_fme_sensor(_workspaces(), "fme_sensor", "fme")
+    history = _items("jobs_page_2.json")
+    route = respx_mock.get(JOBS_URL).mock(side_effect=items_responder(history))
+
+    first = sensor(dg.build_sensor_context(resources={"fme": fme_resource}))
+    assert isinstance(first, dg.SensorResult)
+    assert first.asset_events == []
+    assert set(load_cursor(first.cursor)) == {"alpha.fmw", "Beta Load.fmw"}
+
+    new_job = make_job(900, "Beta Load.fmw", "2026-01-05T00:00:00Z")
+    route.side_effect = items_responder([new_job, *history])
+    second = sensor(dg.build_sensor_context(cursor=first.cursor, resources={"fme": fme_resource}))
+    assert isinstance(second, dg.SensorResult)
+    assert [e.asset_key.to_user_string() for e in second.asset_events] == [
+        "fme/Beta__Load__fmw/workspace__fmw"
+    ]
+
+
+def test_sensor_looks_up_workspaces_with_repository_directly(
+    respx_mock: respx.MockRouter, fme_resource: FMEResource
+) -> None:
+    job = make_job(77, "alpha.fmw", "2026-01-05T00:00:00Z")
+    route = respx_mock.get(JOBS_URL).mock(
+        return_value=httpx.Response(200, json={"items": [job], "totalCount": 1})
+    )
+    sensor = build_fme_sensor(
+        [build_fme_assets("alpha.fmw", repository="Samples")], "fme_sensor", "fme"
+    )
+    context = dg.build_sensor_context(
+        cursor=json.dumps({"alpha.fmw": "2026-01-01T00:00:00+00:00"}),
+        resources={"fme": fme_resource},
+    )
+    result = sensor(context)
+    assert isinstance(result, dg.SensorResult)
+    assert [e.asset_key.to_user_string() for e in result.asset_events] == [
+        "fme/alpha__fmw/workspace__fmw"
+    ]
+    assert route.call_count == 1
+    assert route.calls[0].request.url.params["repository"] == "Samples"
+
+
+def test_sensor_stalled_workspace_does_not_block_others(respx_mock: respx.MockRouter) -> None:
+    # N-4: before, the stalled workspace raised and nothing was emitted for anyone.
+    jobs = [make_job(i, "alpha.fmw", f"2026-01-0{i}T00:00:00Z") for i in range(2, 6)]
+    respx_mock.get(JOBS_URL).mock(side_effect=items_responder(jobs))
+    resource = FMEResource(host="https://fme.example.com", api_key="k", page_size=1, max_pages=1)
+    sensor = build_fme_sensor(_workspaces(), "fme_sensor", "fme")
+    old = "2026-01-01T00:00:00+00:00"
+    context = dg.build_sensor_context(
+        cursor=json.dumps({"alpha.fmw": old, "Beta Load.fmw": old}), resources={"fme": resource}
+    )
+    result = sensor(context)
+    assert isinstance(result, dg.SensorResult)
+    assert {e.asset_key.to_user_string() for e in result.asset_events} == {
+        "fme/alpha__fmw/workspace__fmw",
+        "fme/alpha__fmw/table_a",
+    }
+    cursor = json.loads(result.cursor or "{}")
+    assert cursor == {"alpha.fmw": "2026-01-05T00:00:00+00:00", "Beta Load.fmw": old}
 
 
 def test_materialization_metadata_is_typed() -> None:
