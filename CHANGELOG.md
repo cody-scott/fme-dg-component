@@ -12,6 +12,8 @@ All notable changes to `dagster-fme` are recorded here. The format follows
 - N-5: `FMEComponent` rejects distinct workspaces whose cleaned names give the same asset keys
   (e.g. `a.b` and `a-b` under the same `key_prefix`). The error names both raw workspaces and
   the shared key, instead of Dagster's later duplicate-key error.
+- N-8: a cursor timestamp with no timezone (e.g. hand-edited) is read as UTC instead of
+  raising `TypeError` when compared with FME's times. It's written back with `+00:00`.
 
 ### Changed
 

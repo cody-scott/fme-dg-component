@@ -79,11 +79,11 @@ def test_load_cursor_json() -> None:
     }
 
 
-@pytest.mark.xfail(strict=True, reason="N-8: naive cursor timestamps aren't treated as UTC")
 def test_load_cursor_treats_naive_time_as_utc() -> None:
     cursor = load_cursor('{"a": "2026-01-01T00:00:00"}')
     assert cursor == {"a": datetime.datetime(2026, 1, 1, tzinfo=UTC)}
     assert cursor["a"].tzinfo is not None
+    assert dump_cursor(cursor) == '{"a": "2026-01-01T00:00:00+00:00"}'
 
 
 def test_cursor_round_trips_byte_for_byte() -> None:
