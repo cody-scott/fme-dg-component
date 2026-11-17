@@ -1,6 +1,3 @@
-# Legacy module is kept verbatim as the porting reference until Phase 6 deletes it.
-exclude: ^fme/
-
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

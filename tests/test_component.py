@@ -184,6 +184,14 @@ def test_component_api_key_not_in_repr() -> None:
     assert SECRET not in repr(component)
 
 
+@pytest.mark.parametrize("model", [FMEComponent.get_model_cls(), FMEWorkspaceSpec])
+def test_every_yaml_field_has_a_description(model: type[dg.Model]) -> None:
+    """``dg`` shows these descriptions as field help, so none may be missing."""
+    properties = model.model_json_schema()["properties"]
+    missing = sorted(name for name, prop in properties.items() if not prop.get("description"))
+    assert missing == []
+
+
 def test_build_sensor_false_omits_sensor(load_component_defs: Loader) -> None:
     defs = load_component_defs(
         """

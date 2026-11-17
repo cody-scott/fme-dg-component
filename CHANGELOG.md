@@ -33,6 +33,10 @@ monorepo. The entries below are changes from that module's behaviour.
   `dagster_fme.FMEComponent`. `dg scaffold defs dagster_fme.FMEComponent <name>` writes a starter
   `defs.yaml` with one example workspace, the sensor settings, and a commented-out
   `host`/`api_key` block for an in-component resource.
+- Every `FMEComponent` and `FMEWorkspaceSpec` field has a description, so `dg` shows field help.
+  `FMEResource` fields have descriptions too.
+- A README covering installation, YAML and Python setup, asset keys, and how the sensor cursor
+  and baseline work.
 
 ### Changed
 
@@ -43,6 +47,11 @@ monorepo. The entries below are changes from that module's behaviour.
 - Removed the internal helpers `extract_jobs`, `get_fme_data` and `get_fme_states` from
   `dagster_fme.sensor`. `parse_fme_time` moved to `dagster_fme.resource`, and `dagster_fme.sensor`
   still imports it.
+- `FMEResource` leaves `api_key` out of its repr, as `FMEComponent` already did.
+
+### Removed
+
+- The legacy `fme/` module. Its code now lives in `dagster_fme`.
 
 ### Fixed
 

@@ -114,19 +114,26 @@ class FMEResource(dg.ConfigurableResource):
 
     Attributes:
         host: Base URL of the FME Flow server, e.g. ``https://fme.example.com``.
-        api_key: FME Flow API token. Treat as a secret; supply via env templating.
+        api_key: FME Flow API token. Treat it as a secret and supply it from the
+            environment. It's left out of the resource's repr.
         api_path: Path of the v4 REST API relative to ``host``.
         timeout: Request timeout in seconds.
         page_size: Items requested per page (FME Flow allows 1 to 1000).
         max_pages: Maximum pages fetched by one paginated request before giving up.
     """
 
-    host: str
-    api_key: str
-    api_path: str = "/fmeapiv4"
-    timeout: float = 30.0
-    page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=1000)
-    max_pages: int = Field(default=DEFAULT_MAX_PAGES, ge=1)
+    host: str = Field(description="Base URL of the FME Flow server, e.g. https://fme.example.com.")
+    api_key: str = Field(
+        repr=False, description="FME Flow API token. Supply it from the environment."
+    )
+    api_path: str = Field(default="/fmeapiv4", description="Path of the v4 REST API under host.")
+    timeout: float = Field(default=30.0, description="Request timeout in seconds.")
+    page_size: int = Field(
+        default=DEFAULT_PAGE_SIZE, ge=1, le=1000, description="Items requested per page (1-1000)."
+    )
+    max_pages: int = Field(
+        default=DEFAULT_MAX_PAGES, ge=1, description="Page cap for one paginated request."
+    )
 
     @property
     def base_url(self) -> str:
