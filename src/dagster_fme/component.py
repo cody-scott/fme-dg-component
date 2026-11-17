@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dagster as dg
+from pydantic import Field
 
 from dagster_fme.assets import build_fme_assets
 from dagster_fme.sensor import build_fme_sensor
@@ -12,8 +13,8 @@ class FMEWorkspaceSpec(dg.Model):
     """One FME workspace and the downstream assets it produces."""
 
     workspace: str
-    key_prefix: list[str] = ["FME"]  # noqa: RUF012  BUG-2 (and see BUG-5)
-    asset_list: list[str] = []  # noqa: RUF012  BUG-5
+    key_prefix: list[str] = Field(default_factory=lambda: ["FME"])  # BUG-2
+    asset_list: list[str] = Field(default_factory=list)
     include_job_asset: bool = True
 
 

@@ -25,3 +25,6 @@ monorepo. The entries below are changes from that module's behaviour.
   Fields missing from the job are left out. Before, the raw job dict was passed as metadata.
 - **BUG-9**: The sensor gets its resource with `getattr(context.resources, resource_key)`
   instead of the internal `original_resource_dict`.
+- **BUG-5**: Removed mutable default arguments. `FMEWorkspace` and `build_fme_assets` take
+  `None` and normalise it, and copy the lists callers pass in. `FMEWorkspaceSpec` uses
+  `Field(default_factory=...)`. Ruff `B006` is enforced with no suppressions.

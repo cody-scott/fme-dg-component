@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 import dagster as dg
@@ -24,8 +25,8 @@ class FMEWorkspace:
     def __init__(
         self,
         workspace: str,
-        key_prefix: list[str] = ["fme"],  # noqa: B006  BUG-5
-        asset_list: list[dg.AssetSpec] = [],  # noqa: B006  BUG-5
+        key_prefix: Sequence[str] | None = None,
+        asset_list: Sequence[dg.AssetSpec] | None = None,
         include_job_asset: bool = True,
         asset_spec_kwargs: dict[str, Any] | None = None,
     ) -> None:
@@ -40,8 +41,8 @@ class FMEWorkspace:
             asset_spec_kwargs: Parameters to pass to AssetSpec
         """
         self._workspace = workspace
-        self._key_prefix = key_prefix
-        self._asset_list = asset_list
+        self._key_prefix = list(key_prefix) if key_prefix is not None else ["fme"]
+        self._asset_list = list(asset_list) if asset_list is not None else []
         self._include_job_asset = include_job_asset
         self._asset_spec_kwargs = asset_spec_kwargs if asset_spec_kwargs is not None else {}
 
@@ -92,8 +93,8 @@ class FMEWorkspace:
 
 def build_fme_assets(
     workspace: str,
-    key_prefix: list[str] = ["fme"],  # noqa: B006  BUG-5
-    asset_list: list[str] = [],  # noqa: B006  BUG-5
+    key_prefix: Sequence[str] | None = None,
+    asset_list: Sequence[str] | None = None,
     include_job_asset: bool = True,
     asset_spec_kwargs: dict[str, Any] | None = None,
 ) -> FMEWorkspace:
@@ -102,6 +103,8 @@ def build_fme_assets(
     This places the assets in `asset_list` within the key structure
     of the job asset to allow it to check for events.
     """
+    key_prefix = ["fme"] if key_prefix is None else key_prefix
+    asset_list = [] if asset_list is None else asset_list
     clean_workspace = FMEWorkspace.clean_workspace(workspace)
 
     base_key = [*key_prefix, clean_workspace]
