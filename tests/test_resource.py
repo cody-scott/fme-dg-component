@@ -10,7 +10,7 @@ import httpx
 import pytest
 import respx
 
-from dagster_fme import FMEPaginationLimitError, FMEResource
+from dagster_fme import FMEPaginationLimitError, FMEResource, LatestJobs
 from dagster_fme.resource import JobScan
 from tests.helpers import (
     API_KEY,
@@ -137,14 +137,14 @@ def test_latest_jobs_request_params(respx_mock: respx.MockRouter) -> None:
 
 def test_latest_jobs_stops_when_every_workspace_is_found(respx_mock: respx.MockRouter) -> None:
     route = respx_mock.get(JOBS_URL).mock(side_effect=items_responder(_history()))
-    found = _small_pages().get_latest_successful_jobs(["alpha.fmw", "beta.fmw"])
+    found = _small_pages().get_latest_successful_jobs(["alpha.fmw", "beta.fmw"]).jobs
     assert {ws: j["id"] for ws, j in found.items()} == {"alpha.fmw": 9, "beta.fmw": 8}
     assert route.call_count == 1
 
 
 def test_latest_jobs_keeps_paging_for_first_sight_workspace(respx_mock: respx.MockRouter) -> None:
     route = respx_mock.get(JOBS_URL).mock(side_effect=items_responder(_history()))
-    found = _small_pages().get_latest_successful_jobs(["alpha.fmw", "gamma.fmw"])
+    found = _small_pages().get_latest_successful_jobs(["alpha.fmw", "gamma.fmw"]).jobs
     assert {ws: j["id"] for ws, j in found.items()} == {"alpha.fmw": 9, "gamma.fmw": 100}
     # gamma is the very last job, on the fifth page of two.
     assert route.call_count == 5
@@ -154,7 +154,7 @@ def test_latest_jobs_stops_after_passing_the_cursor(respx_mock: respx.MockRouter
     route = respx_mock.get(JOBS_URL).mock(side_effect=items_responder(_history()))
     since = {"gamma.fmw": T0 + datetime.timedelta(hours=6, minutes=30)}
     found = _small_pages().get_latest_successful_jobs(["gamma.fmw"], since=since)
-    assert found == {}
+    assert found == LatestJobs()
     # Pages are hours [9, 8] and [7, 6]; hour 6 is older than the cursor, so stop.
     assert route.call_count == 2
 
@@ -168,28 +168,81 @@ def test_latest_jobs_cursor_equal_to_a_finish_counts_as_passed(
     assert route.call_count == 1
 
 
-def test_latest_jobs_cap_raises_when_a_cursored_workspace_is_unresolved(
-    respx_mock: respx.MockRouter,
-) -> None:
-    respx_mock.get(JOBS_URL).mock(side_effect=items_responder(_history()))
-    with pytest.raises(FMEPaginationLimitError, match="max_pages=2"):
-        _small_pages(max_pages=2).get_latest_successful_jobs(
-            ["alpha.fmw", "gamma.fmw"], since={"gamma.fmw": T0}
-        )
-
-
-def test_latest_jobs_cap_warns_when_only_first_sight_is_unresolved(
+def test_latest_jobs_cap_reports_stalled_workspace_and_keeps_the_rest(
     respx_mock: respx.MockRouter, caplog: pytest.LogCaptureFixture
 ) -> None:
+    # N-4: gamma's cursor is older than anything within the cap. That must not block alpha.
+    respx_mock.get(JOBS_URL).mock(side_effect=items_responder(_history()))
+    with caplog.at_level(logging.ERROR):
+        result = _small_pages(max_pages=2).get_latest_successful_jobs(
+            ["alpha.fmw", "gamma.fmw"], since={"alpha.fmw": T0, "gamma.fmw": T0}
+        )
+    assert {ws: j["id"] for ws, j in result.jobs.items()} == {"alpha.fmw": 9}
+    assert result.stalled == frozenset({"gamma.fmw"})
+    assert result.baselines == {}
+    assert "gamma.fmw" in caplog.text
+    assert "alpha.fmw" not in caplog.text
+    assert API_KEY not in caplog.text
+
+
+def test_latest_jobs_cap_baselines_first_sight_workspace(
+    respx_mock: respx.MockRouter, caplog: pytest.LogCaptureFixture
+) -> None:
+    # N-3: gamma is never reached, so it gets the newest finish seen as its baseline.
     route = respx_mock.get(JOBS_URL).mock(side_effect=items_responder(_history()))
     with caplog.at_level(logging.WARNING):
-        found = _small_pages(max_pages=2).get_latest_successful_jobs(
+        result = _small_pages(max_pages=2).get_latest_successful_jobs(
             ["alpha.fmw", "gamma.fmw"], since={"alpha.fmw": T0}
         )
-    assert {ws: j["id"] for ws, j in found.items()} == {"alpha.fmw": 9}
+    assert {ws: j["id"] for ws, j in result.jobs.items()} == {"alpha.fmw": 9}
+    assert result.baselines == {"gamma.fmw": T0 + datetime.timedelta(hours=9)}
+    assert result.stalled == frozenset()
     assert route.call_count == 2
     assert "gamma.fmw" in caplog.text
     assert API_KEY not in caplog.text
+
+
+def test_latest_jobs_full_scan_baselines_never_run_workspace(
+    respx_mock: respx.MockRouter,
+) -> None:
+    # N-3: reading the whole history without a match also gives a baseline.
+    route = respx_mock.get(JOBS_URL).mock(side_effect=items_responder(_history()))
+    result = _small_pages().get_latest_successful_jobs(["missing.fmw"])
+    assert result.jobs == {}
+    assert result.baselines == {"missing.fmw": T0 + datetime.timedelta(hours=9)}
+    assert route.call_count == 5
+
+
+def test_latest_jobs_baseline_lets_next_tick_stop_on_the_first_page(
+    respx_mock: respx.MockRouter,
+) -> None:
+    route = respx_mock.get(JOBS_URL).mock(side_effect=items_responder(_history()))
+    resource = _small_pages(max_pages=2)
+    first = resource.get_latest_successful_jobs(["missing.fmw"])
+    calls_before = route.call_count
+    resource.get_latest_successful_jobs(["missing.fmw"], since=first.baselines)
+    assert route.call_count - calls_before == 1
+
+
+def test_latest_jobs_out_of_order_cap_gives_no_baseline(
+    respx_mock: respx.MockRouter, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Without sort, newest_seen of a partial read isn't trustworthy.
+    jobs = [make_job(1, "alpha.fmw", _iso(1)), make_job(2, "beta.fmw", _iso(5))] * 3
+    respx_mock.get(JOBS_URL).mock(
+        side_effect=lambda request: httpx.Response(
+            200,
+            json={
+                "items": jobs[:2],
+                "totalCount": 100,
+                "offset": int(request.url.params["offset"]),
+            },
+        )
+    )
+    with caplog.at_level(logging.WARNING):
+        result = _small_pages(max_pages=2).get_latest_successful_jobs(["gamma.fmw"])
+    assert result == LatestJobs()
+    assert "out of order" in caplog.text
 
 
 def test_latest_jobs_handles_a_job_repeated_across_pages(respx_mock: respx.MockRouter) -> None:
@@ -204,14 +257,85 @@ def test_latest_jobs_handles_a_job_repeated_across_pages(respx_mock: respx.MockR
         return httpx.Response(200, json=pages[offset // 2] | {"totalCount": 5, "offset": offset})
 
     respx_mock.get(JOBS_URL).mock(side_effect=respond)
-    found = _small_pages().get_latest_successful_jobs(["alpha.fmw", "gamma.fmw"])
+    found = _small_pages().get_latest_successful_jobs(["alpha.fmw", "gamma.fmw"]).jobs
     assert {ws: j["id"] for ws, j in found.items()} == {"alpha.fmw": 1, "gamma.fmw": 0}
 
 
 def test_latest_jobs_no_workspaces_makes_no_request(respx_mock: respx.MockRouter) -> None:
     route = respx_mock.get(JOBS_URL).mock(side_effect=items_responder(_history()))
-    assert _small_pages().get_latest_successful_jobs([]) == {}
+    assert _small_pages().get_latest_successful_jobs([]) == LatestJobs()
     assert route.call_count == 0
+
+
+# --- per-repository lookup (strategy 1) ----------------------------------------------
+
+
+def test_repository_lookup_sends_one_filtered_request(respx_mock: respx.MockRouter) -> None:
+    job = make_job(42, "alpha.fmw", _iso(3))
+    route = respx_mock.get(JOBS_URL).mock(
+        return_value=httpx.Response(200, json={"items": [job], "totalCount": 7})
+    )
+    result = _small_pages().get_latest_successful_jobs(
+        ["alpha.fmw"], repositories={"alpha.fmw": "Samples"}
+    )
+    assert result.jobs == {"alpha.fmw": job}
+    assert route.call_count == 1
+    params = route.calls[0].request.url.params
+    assert dict(params) == {
+        "status": "success",
+        "sort": "timeFinished_desc",
+        "repository": "Samples",
+        "workspace": "alpha.fmw",
+        "limit": "1",
+        "offset": "0",
+    }
+    assert route.calls[0].request.headers["Authorization"] == f"fmetoken token={API_KEY}"
+
+
+def test_repository_lookup_with_no_job_keeps_nothing(respx_mock: respx.MockRouter) -> None:
+    respx_mock.get(JOBS_URL).mock(
+        return_value=httpx.Response(200, json={"items": [], "totalCount": 0})
+    )
+    result = _small_pages().get_latest_successful_jobs(
+        ["alpha.fmw"], since={"alpha.fmw": T0}, repositories={"alpha.fmw": "Samples"}
+    )
+    # One cheap request per tick, so no baseline and never stalled.
+    assert result == LatestJobs()
+
+
+def test_repository_lookup_ignores_a_job_for_another_workspace(
+    respx_mock: respx.MockRouter,
+) -> None:
+    respx_mock.get(JOBS_URL).mock(
+        return_value=httpx.Response(200, json={"items": [make_job(1, "beta.fmw", _iso(1))]})
+    )
+    resource = _small_pages()
+    assert resource.get_latest_job_in_repository("alpha.fmw", "Samples") is None
+
+
+def test_repository_lookup_raises_on_http_error(respx_mock: respx.MockRouter) -> None:
+    respx_mock.get(JOBS_URL).mock(return_value=httpx.Response(500))
+    with pytest.raises(httpx.HTTPStatusError):
+        _small_pages().get_latest_job_in_repository("alpha.fmw", "Samples")
+
+
+def test_mixed_lookup_scans_only_workspaces_without_repository(
+    respx_mock: respx.MockRouter,
+) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        if "repository" in request.url.params:
+            return httpx.Response(200, json={"items": [make_job(500, "gamma.fmw", _iso(0))]})
+        return items_responder(_history())(request)
+
+    route = respx_mock.get(JOBS_URL).mock(side_effect=respond)
+    result = _small_pages().get_latest_successful_jobs(
+        ["alpha.fmw", "gamma.fmw"], since={"gamma.fmw": T0}, repositories={"gamma.fmw": "Samples"}
+    )
+    assert {ws: j["id"] for ws, j in result.jobs.items()} == {"alpha.fmw": 9, "gamma.fmw": 500}
+    # One direct request for gamma, then one scan page finds alpha. Without the repository
+    # gamma's old cursor would have forced every page to be read.
+    assert route.call_count == 2
+    assert result.stalled == frozenset()
 
 
 # --- JobScan (pure) ------------------------------------------------------------------
@@ -238,6 +362,21 @@ def test_scan_raises_for_target_job_without_time() -> None:
     scan = JobScan(targets=frozenset({"alpha.fmw"}), since={})
     with pytest.raises(ValueError, match="timeFinished"):
         scan.add_page([make_job(7, "alpha.fmw", None)])
+
+
+def test_scan_finish_without_jobs_gives_no_baseline() -> None:
+    scan = JobScan(targets=frozenset({"alpha.fmw"}), since={})
+    assert scan.finish(reached_end=True) == LatestJobs()
+
+
+def test_scan_finish_reached_end_resolves_out_of_order_scan() -> None:
+    scan = JobScan(targets=frozenset({"alpha.fmw", "beta.fmw"}), since={"beta.fmw": T0})
+    scan.add_page([make_job(1, "gamma.fmw", _iso(1)), make_job(2, "gamma.fmw", _iso(5))])
+    assert not scan.ordered
+    result = scan.finish(reached_end=True)
+    # Every job was read, so the newest is known and nothing is stalled.
+    assert result.baselines == {"alpha.fmw": T0 + datetime.timedelta(hours=5)}
+    assert result.stalled == frozenset()
 
 
 def test_scan_complete_with_no_jobs_only_when_nothing_targeted() -> None:

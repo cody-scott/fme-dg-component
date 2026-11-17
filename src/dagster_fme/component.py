@@ -47,6 +47,13 @@ class FMEWorkspaceSpec(dg.Model):
         default=DEFAULT_JOB_ASSET_NAME,
         description="Last key component of the workspace's own asset.",
     )
+    repository: str | None = Field(
+        default=None,
+        description="FME Flow repository that holds the workspace. When set, the sensor "
+        "looks this workspace up with one direct request instead of the shared job scan, "
+        "which suits workspaces that run rarely on a busy server. Asset keys and the "
+        "cursor don't change.",
+    )
 
 
 def _doc(description: str) -> dg.Resolver:
@@ -193,6 +200,7 @@ class FMEComponent(dg.Component, dg.Model, dg.Resolvable):
                 spec.asset_list,
                 include_job_asset=spec.include_job_asset,
                 job_asset_name=spec.job_asset_name,
+                repository=spec.repository,
             )
             for spec in self.fme_asset_specs
         ]

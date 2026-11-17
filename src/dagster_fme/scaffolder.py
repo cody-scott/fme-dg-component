@@ -24,6 +24,9 @@ attributes:
       key_prefix: [fme]
       include_job_asset: true
       asset_list: [example_table]
+      # Optional: the workspace's FME Flow repository, to look it up with one direct
+      # request instead of the shared job scan. Useful for rarely run workspaces.
+      # repository: Samples
 """
 
 

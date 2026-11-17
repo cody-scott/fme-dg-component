@@ -6,7 +6,9 @@ import re
 from collections.abc import Callable
 
 import dagster as dg
+import httpx
 import pytest
+import respx
 
 from dagster_fme import FMEComponent, FMEResource, FMEWorkspaceSpec
 
@@ -235,3 +237,37 @@ def test_build_sensor_false_omits_sensor(load_component_defs: Loader) -> None:
     )
     assert not list(defs.sensors or [])
     assert _asset_keys(defs) == {"fme/alpha__fmw/workspace__fmw"}
+
+
+def test_repository_from_yaml_reaches_the_sensor_lookup(
+    load_component_defs: Loader, respx_mock: respx.MockRouter
+) -> None:
+    defs = load_component_defs(
+        """
+        type: dagster_fme.FMEComponent
+        attributes:
+          host: https://fme.example.com
+          api_key: test-token
+          fme_asset_specs:
+            - workspace: alpha.fmw
+              repository: Samples
+            - workspace: beta.fmw
+        """
+    )
+    assert _asset_keys(defs) == {"fme/alpha__fmw/workspace__fmw", "fme/beta__fmw/workspace__fmw"}
+
+    route = respx_mock.get("https://fme.example.com/fmeapiv4/jobs").mock(
+        return_value=httpx.Response(200, json={"items": [], "totalCount": 0})
+    )
+    sensor = next(iter(defs.sensors or []))
+    assert isinstance(sensor, dg.SensorDefinition)
+    resources = defs.resources or {}
+    sensor(dg.build_sensor_context(resources=dict(resources)))
+    filtered = [c for c in route.calls if "repository" in c.request.url.params]
+    assert len(filtered) == 1
+    assert filtered[0].request.url.params["workspace"] == "alpha.fmw"
+    assert filtered[0].request.url.params["repository"] == "Samples"
+
+
+def test_repository_defaults_to_none() -> None:
+    assert FMEWorkspaceSpec(workspace="a.fmw").repository is None

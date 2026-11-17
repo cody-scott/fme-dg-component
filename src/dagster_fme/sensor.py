@@ -81,26 +81,31 @@ def evaluate_jobs(
     cursor: Mapping[str, datetime.datetime],
     jobs: Mapping[str, Mapping[str, Any]],
     fme_assets: Sequence[FMEWorkspace],
+    baselines: Mapping[str, datetime.datetime] | None = None,
 ) -> tuple[list[dg.AssetMaterialization], dict[str, datetime.datetime]]:
     """Decide which materializations to emit and compute the next cursor.
 
     A workspace seen for the first time is recorded as a baseline and emits nothing.
     A strictly newer ``timeFinished`` than the cursor emits a materialization for
     every asset spec of that workspace. Configured workspaces that have no job in
-    ``jobs`` keep their existing cursor value. Cursor entries for workspaces that
-    are no longer configured are dropped.
+    ``jobs`` keep their existing cursor value, or take their entry in ``baselines``
+    if they have none. Cursor entries for workspaces that are no longer configured
+    are dropped.
 
     Args:
         cursor: The current cursor, from ``load_cursor``.
         jobs: The latest successful job per raw workspace name, from
             ``FMEResource.get_latest_successful_jobs``.
         fme_assets: The configured workspaces.
+        baselines: Cursor times for first-sight workspaces that had no job, from
+            ``LatestJobs.baselines``.
 
     Returns:
         The materializations to emit and the new cursor.
     """
     events: list[dg.AssetMaterialization] = []
     new_cursor: dict[str, datetime.datetime] = {}
+    baselines = baselines or {}
 
     for asset in fme_assets:
         workspace = asset.workspace
@@ -108,8 +113,9 @@ def evaluate_jobs(
         job = jobs.get(workspace)
 
         if job is None:
-            if previous is not None:
-                new_cursor[workspace] = previous
+            fallback = previous if previous is not None else baselines.get(workspace)
+            if fallback is not None:
+                new_cursor[workspace] = fallback
             continue
 
         finished = parse_fme_time(job["timeFinished"])
@@ -139,7 +145,8 @@ def build_fme_sensor(
 
     On each tick the sensor asks FME Flow for the latest successful job of each
     workspace, using ``FMEResource.get_latest_successful_jobs``. A workspace's first
-    finish is recorded in the cursor as a baseline and emits nothing. A strictly newer
+    finish is recorded in the cursor as a baseline and emits nothing. A workspace the
+    scan can't find at all gets a baseline at the newest finish it saw. A strictly newer
     finish emits an ``AssetMaterialization`` for every asset spec of that workspace.
 
     Args:
@@ -167,10 +174,12 @@ def build_fme_sensor(
         fme_resource = cast(FMEResource, getattr(context.resources, fme_resource_key))
 
         cursor = load_cursor(context.cursor)
-        jobs = fme_resource.get_latest_successful_jobs(
-            [a.workspace for a in fme_assets], since=cursor
+        latest = fme_resource.get_latest_successful_jobs(
+            [a.workspace for a in fme_assets],
+            since=cursor,
+            repositories={a.workspace: a.repository for a in fme_assets if a.repository},
         )
-        events, new_cursor = evaluate_jobs(cursor, jobs, fme_assets)
+        events, new_cursor = evaluate_jobs(cursor, latest.jobs, fme_assets, latest.baselines)
 
         return dg.SensorResult(asset_events=events, cursor=dump_cursor(new_cursor))
 

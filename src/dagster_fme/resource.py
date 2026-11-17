@@ -46,6 +46,7 @@ class JobScan:
         since: Cursor time per workspace. Workspaces without one are first sight.
         found: Latest job seen per target workspace.
         oldest_seen: Earliest ``timeFinished`` seen so far.
+        newest_seen: Latest ``timeFinished`` seen so far.
         ordered: Whether every job so far arrived newest first.
     """
 
@@ -53,6 +54,7 @@ class JobScan:
     since: Mapping[str, datetime.datetime]
     found: dict[str, dict[str, Any]] = field(default_factory=dict)
     oldest_seen: datetime.datetime | None = None
+    newest_seen: datetime.datetime | None = None
     ordered: bool = True
 
     def add_page(self, items: Iterable[Mapping[str, Any]]) -> None:
@@ -79,6 +81,8 @@ class JobScan:
                 self.ordered = False
             if self.oldest_seen is None or time_finished < self.oldest_seen:
                 self.oldest_seen = time_finished
+            if self.newest_seen is None or time_finished > self.newest_seen:
+                self.newest_seen = time_finished
 
             if is_target:
                 assert isinstance(workspace, str)
@@ -108,6 +112,48 @@ class JobScan:
     def is_complete(self) -> bool:
         """Whether every target workspace is resolved, so the scan can stop."""
         return not self.unresolved
+
+    def finish(self, reached_end: bool) -> LatestJobs:
+        """Summarise the scan once paging has stopped.
+
+        A first-sight workspace the scan didn't find gets a baseline at ``newest_seen``,
+        so its next job counts as newer and emits, and later ticks can stop early
+        instead of reading every page again. That needs a trustworthy ``newest_seen``:
+        either the scan read every job (``reached_end``) or the jobs arrived newest first.
+
+        A workspace with a cursor time that is still unresolved when the scan stopped
+        short is *stalled*: a newer job may exist beyond the pages read.
+
+        Args:
+            reached_end: Whether the scan read the last page of jobs, as opposed to
+                stopping early or at the page cap.
+        """
+        unresolved = set() if reached_end else self.unresolved
+        baselines: dict[str, datetime.datetime] = {}
+        if self.newest_seen is not None and (reached_end or self.ordered):
+            for ws in self.targets:
+                if ws not in self.found and ws not in self.since:
+                    baselines[ws] = self.newest_seen
+        stalled = frozenset(ws for ws in unresolved if ws in self.since)
+        return LatestJobs(jobs=dict(self.found), baselines=baselines, stalled=stalled)
+
+
+@dataclass(frozen=True)
+class LatestJobs:
+    """What one job lookup learned about each workspace.
+
+    Attributes:
+        jobs: The latest successful job per raw workspace name. Workspaces with no job
+            found are left out.
+        baselines: Cursor times for first-sight workspaces that weren't found, so their
+            next job emits. Empty when the lookup can't vouch for the newest job time.
+        stalled: Workspaces with a cursor time that the lookup couldn't resolve within
+            ``max_pages``. Their cursor should be kept as-is.
+    """
+
+    jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    baselines: dict[str, datetime.datetime] = field(default_factory=dict)
+    stalled: frozenset[str] = frozenset()
 
 
 class FMEResource(dg.ConfigurableResource):
@@ -189,38 +235,95 @@ class FMEResource(dg.ConfigurableResource):
             f"{self.page_size} items. Raise max_pages or page_size on the resource."
         )
 
+    def get_latest_job_in_repository(
+        self, workspace: str, repository: str
+    ) -> dict[str, Any] | None:
+        """Fetch the latest successful job for one workspace in one repository.
+
+        Makes a single request filtered on ``repository`` and ``workspace`` (FME Flow
+        only applies the ``workspace`` filter together with ``repository``), sorted
+        newest first with ``limit=1``.
+
+        Args:
+            workspace: Raw workspace name.
+            repository: FME Flow repository that holds the workspace.
+
+        Returns:
+            The latest successful job, or None if the workspace has none.
+
+        Raises:
+            httpx.HTTPStatusError: If the response status is 4xx or 5xx.
+        """
+        params = {
+            "status": "success",
+            "sort": JOBS_SORT,
+            "repository": repository,
+            "workspace": workspace,
+            "limit": 1,
+            "offset": 0,
+        }
+        with httpx.Client(headers=self.auth_header, timeout=self.timeout) as client:
+            response = client.get(f"{self.base_url}/jobs", params=params)
+            response.raise_for_status()
+        # Reuse the scan so a job for another workspace is ignored and a missing
+        # timeFinished is reported the same way.
+        scan = JobScan(targets=frozenset({workspace}), since={})
+        scan.add_page(response.json().get("items") or [])
+        return scan.found.get(workspace)
+
     def get_latest_successful_jobs(
         self,
         workspaces: Iterable[str],
         since: Mapping[str, datetime.datetime] | None = None,
-    ) -> dict[str, dict[str, Any]]:
+        repositories: Mapping[str, str] | None = None,
+    ) -> LatestJobs:
         """Fetch the latest successful job for each workspace.
 
-        Jobs are requested newest first (``sort=timeFinished_desc``), and paging stops
-        as soon as every workspace has been found or the scan has gone past that
-        workspace's ``since`` time. See ``JobScan``.
+        Workspaces listed in ``repositories`` are looked up one request each with
+        ``get_latest_job_in_repository``. The rest share one newest-first scan of
+        ``/jobs`` (``sort=timeFinished_desc``), which stops as soon as every workspace
+        has been found or the scan has gone past that workspace's ``since`` time.
+        See ``JobScan``.
 
-        If ``max_pages`` is reached while workspaces are unresolved, this raises only
-        when one of them has a ``since`` time, because a newer job could be missed.
-        Workspaces without one are first sight and would only record a baseline, so
-        a warning is logged and the jobs found so far are returned.
+        The scan never raises for the page cap. A first-sight workspace it doesn't find
+        gets a baseline (see ``JobScan.finish``), and a workspace with a ``since`` time
+        it can't resolve within ``max_pages`` is reported as stalled and logged as an
+        error. Other workspaces still get their jobs.
 
         Args:
             workspaces: Raw names of the workspaces to look for.
             since: Last recorded ``timeFinished`` per workspace, from the sensor cursor.
+            repositories: Repository per raw workspace name, for workspaces to look up
+                directly instead of through the scan.
 
         Returns:
-            The latest successful job object per workspace. Workspaces with no job
-            found are left out.
-
-        Raises:
-            FMEPaginationLimitError: If the page cap is reached while a workspace that
-                has a ``since`` time is unresolved.
+            The jobs, baselines and stalled workspaces.
         """
-        scan = JobScan(targets=frozenset(workspaces), since=dict(since or {}))
-        if not scan.targets:
-            return {}
+        since = dict(since or {})
+        repositories = dict(repositories or {})
+        targets = frozenset(workspaces)
 
+        direct = {ws: repositories[ws] for ws in targets if ws in repositories}
+        direct_jobs: dict[str, dict[str, Any]] = {}
+        for ws, repository in sorted(direct.items()):
+            job = self.get_latest_job_in_repository(ws, repository)
+            if job is not None:
+                direct_jobs[ws] = job
+
+        result = self._scan_latest_jobs(targets - direct.keys(), since)
+        return LatestJobs(
+            jobs=result.jobs | direct_jobs, baselines=result.baselines, stalled=result.stalled
+        )
+
+    def _scan_latest_jobs(
+        self, targets: frozenset[str], since: Mapping[str, datetime.datetime]
+    ) -> LatestJobs:
+        """Run the shared newest-first scan for ``targets`` and log anything unresolved."""
+        scan = JobScan(targets=targets, since=since)
+        if not scan.targets:
+            return LatestJobs()
+
+        reached_end = False
         pages = self.request_offset_paginated(
             "/jobs", params={"status": "success", "sort": JOBS_SORT}
         )
@@ -230,14 +333,34 @@ class FMEResource(dg.ConfigurableResource):
                     scan.add_page(items)
                     if scan.is_complete:
                         break
+                else:
+                    reached_end = True
         except FMEPaginationLimitError:
-            if any(ws in scan.since for ws in scan.unresolved):
-                raise
-            dg.get_dagster_logger().warning(
-                "Reached max_pages=%s before finding jobs for %s. They will get a "
-                "baseline once a newer job finishes.",
-                self.max_pages,
-                ", ".join(sorted(scan.unresolved)),
-            )
+            pass
 
-        return scan.found
+        result = scan.finish(reached_end)
+        logger = dg.get_dagster_logger()
+        if result.stalled:
+            logger.error(
+                "Reached max_pages=%s without resolving %s. Their cursor is kept and a newer "
+                "job may be missed. Raise max_pages or page_size, or set repository on these "
+                "workspaces so they're looked up directly.",
+                self.max_pages,
+                ", ".join(sorted(result.stalled)),
+            )
+        if result.baselines:
+            logger.warning(
+                "Found no successful job for %s. Recording a baseline at %s, so their next "
+                "job materializes. Check the workspace name if this is unexpected.",
+                ", ".join(sorted(result.baselines)),
+                scan.newest_seen.isoformat() if scan.newest_seen else "",
+            )
+        missing = scan.targets - result.jobs.keys() - result.baselines.keys() - set(since)
+        if missing:
+            logger.warning(
+                "Reached max_pages=%s before finding jobs for %s, and the jobs arrived out of "
+                "order, so no baseline was recorded.",
+                self.max_pages,
+                ", ".join(sorted(missing)),
+            )
+        return result

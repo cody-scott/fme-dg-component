@@ -119,6 +119,7 @@ Each entry in `fme_asset_specs`:
 | `asset_list` | `[]` | Downstream assets the workspace writes. |
 | `include_job_asset` | `true` | Whether to add an asset for the workspace itself. |
 | `job_asset_name` | `workspace__fmw` | Last key component of the job asset. |
+| `repository` | unset | FME Flow repository of the workspace. When set, the sensor looks it up with one direct request instead of the shared scan (see below). |
 
 `dg` shows the same descriptions as field help.
 
@@ -173,10 +174,17 @@ is `key_prefix + [clean(workspace), asset]`.
 
 ## How the sensor works
 
-On each tick the sensor asks FME Flow for successful jobs, newest first
-(`GET /jobs?status=success&sort=timeFinished_desc`). It stops paging as soon as it has found the
-latest job for every configured workspace, or has scanned past the time already recorded for
-that workspace.
+On each tick the sensor asks FME Flow for the latest successful job of each workspace, in two ways:
+
+- **Shared scan** for workspaces without `repository`: one newest-first read of
+  `GET /jobs?status=success&sort=timeFinished_desc`. It stops paging as soon as it has found the
+  latest job for every such workspace, or has scanned past the time already recorded for it. It
+  reads at most `page_size × max_pages` jobs (20,000 at the defaults).
+- **Direct lookup** for workspaces with `repository`: one request each,
+  `GET /jobs?status=success&repository=<repo>&workspace=<name>&sort=timeFinished_desc&limit=1`
+  (FME Flow only filters on `workspace` together with `repository`). This costs one request no
+  matter how busy the server is, so set it for workspaces that run rarely. Matching and the
+  cursor still use the workspace name alone.
 
 The cursor is JSON mapping each raw workspace name to the `timeFinished` of the last job it
 acted on:
@@ -190,6 +198,13 @@ For each configured workspace:
 - **First sight (baseline).** If the cursor has no entry, the latest finish is recorded and
   **nothing is emitted**. Past jobs aren't replayed as materializations. The first
   materialization comes from the next job that finishes after the sensor starts watching.
+- **First sight, not found by the scan.** If the shared scan reads every job, or reaches
+  `max_pages`, without finding the workspace, the newest finish the scan saw is recorded as its
+  baseline and a warning is logged. Its next real job then emits, and later ticks stop early
+  instead of re-reading every page. A misspelled name shows up as that warning, once. (If the
+  server didn't return jobs newest first and the scan stopped at the cap, no baseline is
+  recorded.) A workspace with `repository` that has no job gets no baseline; its first job
+  becomes the baseline as usual.
 - **Newer finish.** If the latest `timeFinished` is strictly newer than the cursor, the sensor
   emits a materialization for every asset of that workspace and advances the cursor.
 - **Same or older finish, or no job found.** Nothing is emitted and the cursor entry is kept.
@@ -200,10 +215,12 @@ cancelled jobs are ignored.
 Each materialization carries typed metadata: `fme_job_id`, `workspace`, `repository`, `status`,
 `time_started`, `time_finished`, `duration_seconds`, and the full job object as `fme_job`.
 
-If a scan reaches `max_pages` while a workspace that already has a cursor entry is unresolved,
-the tick fails with `FMEPaginationLimitError`, because a newer job could otherwise be missed.
-Raise `max_pages` or `page_size` if you see it. Workspaces still waiting for their baseline only
-log a warning.
+If the shared scan reaches `max_pages` while a workspace that already has a cursor entry is
+unresolved (it hasn't run within the last `page_size × max_pages` successful jobs), that workspace
+is **stalled**: its cursor is kept and an error naming it is logged. Every other workspace still
+gets its events, so one idle workspace doesn't block the rest. A newer job for the stalled
+workspace beyond the cap is missed until it's in reach, so raise `max_pages` or `page_size`, or
+set `repository` on it to switch it to a direct lookup.
 
 ## Development
 

@@ -1,7 +1,7 @@
 # PLAN.md: Rebuild `fme/` into the `dagster-fme` uv package
 
-Status: **in progress** (Phases 0–6 done and merged, Phase 7 merged, Phase 8 in review. Phases 7–10 come from the code review in
-[`docs/SPEC.md`](docs/SPEC.md); Phases 9 and 10 wait on user decisions). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
+Status: **in progress** (Phases 0–6 done and merged, Phases 7 and 8 merged, Phase 9 in review. Phases 7–10 come from the code review in
+[`docs/SPEC.md`](docs/SPEC.md); Phase 10 waits on user decisions). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
 
 ## Goal
 
@@ -307,14 +307,32 @@ Decisions to get from the user before starting:
       workspaces with no repository.
    c. Both a and b.
 
+Decided (user, 2026-11-17): **N-3 option a**, **N-4 option c** (both a and b). The question of whether workspace
+names are unique across repositories wasn't settled, so `repository` is a query hint only: matching and the cursor
+stay keyed by the raw workspace name, and duplicate workspace names are still rejected. That question moves to
+Phase 10.
+
 Tasks once decided:
 
-- [ ] Implement the chosen N-3 option in `JobScan` / `get_latest_successful_jobs`, keeping the decision logic pure.
-- [ ] Implement the chosen N-4 option. If `repository` is added, it's a YAML schema addition: optional field, default
+- [x] Implement the chosen N-3 option in `JobScan` / `get_latest_successful_jobs`, keeping the decision logic pure.
+- [x] Implement the chosen N-4 option. If `repository` is added, it's a YAML schema addition: optional field, default
       `None`, documented with `Field(description=...)`, and covered by a component YAML test.
-- [ ] respx tests for each new path, asserting on params and call count.
-- [ ] README: update "how the cursor and baseline work" and the job fetching description.
-- [ ] `CHANGELOG.md` entries for every behaviour change.
+- [x] respx tests for each new path, asserting on params and call count.
+- [x] README: update "how the cursor and baseline work" and the job fetching description.
+- [x] `CHANGELOG.md` entries for every behaviour change.
+- [x] Notes from Phase 9:
+  - `JobScan` tracks `newest_seen`, and `JobScan.finish(reached_end)` (pure) returns `LatestJobs`: `jobs`,
+    `baselines` (first-sight workspaces not found, set to `newest_seen`) and `stalled` (cursored workspaces left
+    unresolved at the cap). Baselines need a trustworthy `newest_seen`, so they're only set when the scan read every
+    page or the jobs arrived newest first.
+  - `get_latest_successful_jobs` no longer raises at the cap. It logs an error for stalled workspaces and a warning
+    for new baselines. `evaluate_jobs` takes `baselines` and applies them only to workspaces with no cursor entry.
+  - Workspaces with `repository` go through `get_latest_job_in_repository` (one request, `limit=1`) and skip the
+    scan. No baseline for them when they have no job: the next tick is one cheap request anyway.
+  - Residual: a baselined workspace that never runs keeps its baseline cursor. Once that time drops out of the
+    `page_size × max_pages` window it becomes stalled: one error log and a full scan per tick, but no longer
+    blocking. Setting `repository` avoids it. Advancing idle cursors to the scan position would also fix it, but
+    that changes what the cursor means, so it's not done here.
 
 ### Phase 10: Close the YAML gaps and tidy `FMEWorkspace` (needs user approval)
 
@@ -329,6 +347,9 @@ Branch: `phase-10/yaml-gaps`. Each item changes a public contract, so the user a
       `key` and `description` are rejected. Test that it reaches every spec through the YAML path.
 - [ ] **N-7** (YAML schema): add optional `timeout` and `api_path` to `FMEComponent`, valid only with `host` and
       `api_key`, like `page_size`. Or, if the user prefers, document the external resource as the way to set them.
+- [ ] **Q3, moved from Phase 9** (cursor format): are workspace names unique across FME repositories? If not, match on
+      `repository/workspace`, which changes the cursor format and needs a backwards-compatible reader. Phase 9 added
+      `repository` as a query hint only, keyed by workspace name. See *Open questions*.
 - [ ] Update the scaffolder template and README for any new fields, and add `CHANGELOG.md` entries.
 
 ---
@@ -354,7 +375,7 @@ Agents: put findings here and don't silently guess.
   - Implication for Phase 4: strategy 1 (per-workspace `limit=1`) needs the **repository** as well as the workspace,
     which the spec doesn't currently carry. Strategy 2 (default sort `timeFinished_desc`, early stop) needs nothing new.
 - [ ] Are workspace names unique across FME repositories? If not, should matching use `repository/workspace`?
-      Ask the user before changing the match key, because it changes the cursor format.
+      Ask the user before changing the match key, because it changes the cursor format. (Moved to Phase 10.)
   - Related follow-up (deferred in Phase 4, user decision): an optional `repository` on `FMEWorkspaceSpec` would
     let those workspaces use strategy 1 (`repository` + `workspace` filter, `limit=1`, one request each).
 - [x] Do the monorepo callers need back-compat aliases (`FME`, `FMEAssetSpec`, `build_asset_sensor`)? No (user decision).
@@ -364,4 +385,5 @@ Agents: put findings here and don't silently guess.
     1.11.0 and 1.13. Use the function form.
 - [ ] Does FME Flow always return `timeFinished` in UTC? The v4 spec only says `date-time`. (Raised again by the
       review: affects N-8 and how cursor values compare.)
-- [ ] Review decisions (from `docs/SPEC.md`): N-3 option, N-4 option, approval for R3, N-6 and N-7. See Phases 9 and 10.
+- [ ] Review decisions (from `docs/SPEC.md`): approval for R3, N-6 and N-7, and Q3 (see Phase 10). N-3 and N-4 were
+      decided for Phase 9 (options a and c).

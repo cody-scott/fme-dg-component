@@ -5,6 +5,15 @@ All notable changes to `dagster-fme` are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- N-4: optional `repository` on `FMEWorkspaceSpec`, `build_fme_assets` and `FMEWorkspace`. A
+  workspace that sets it is looked up with one request
+  (`status=success&repository=...&workspace=...&sort=timeFinished_desc&limit=1`) instead of the
+  shared newest-first scan. Asset keys and the cursor (still keyed by workspace name) don't change.
+- `FMEResource.get_latest_job_in_repository(workspace, repository)` and the `LatestJobs` result
+  type, exported from `dagster_fme`.
+
 ### Fixed
 
 - N-1: passing `description` in `asset_spec_kwargs` no longer raises `TypeError` on the job
@@ -19,6 +28,17 @@ All notable changes to `dagster-fme` are recorded here. The format follows
 
 ### Changed
 
+- N-3 (behaviour change): a first-sight workspace that the shared scan doesn't find, after
+  reading every job or reaching `max_pages`, gets a baseline at the newest `timeFinished` the
+  scan saw. Its next job now emits a materialization; before, that job only became the baseline.
+  Before, such a workspace (e.g. a misspelled name) also made every tick read every page.
+- N-4 (behaviour change): reaching `max_pages` while a workspace with a cursor entry is
+  unresolved no longer raises `FMEPaginationLimitError`. The workspace is reported as stalled,
+  keeps its cursor and is logged as an error. Events for other workspaces are still emitted;
+  before, every workspace was blocked on every tick.
+- `FMEResource.get_latest_successful_jobs` takes an optional `repositories` mapping and returns
+  `LatestJobs` (`jobs`, `baselines`, `stalled`) instead of a plain dict of jobs; the dict is
+  now `.jobs`. `evaluate_jobs` takes an optional `baselines` mapping.
 - Internal simplification of the sensor and resource (Phase 7, review items R1, R2 and R4 to R8).
   YAML, asset keys and the cursor format are unchanged: a test checks that a cursor written
   by the earlier code round-trips byte for byte. The private helpers `LatestJob`,
