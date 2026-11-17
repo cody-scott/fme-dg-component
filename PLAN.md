@@ -1,6 +1,6 @@
 # PLAN.md: Rebuild `fme/` into the `dagster-fme` uv package
 
-Status: **in progress** (Phases 0–6 done and merged. Phases 7–10 come from the code review in
+Status: **in progress** (Phases 0–6 done and merged, Phase 7 in review. Phases 7–10 come from the code review in
 [`docs/SPEC.md`](docs/SPEC.md); Phases 9 and 10 wait on user decisions). Tick boxes as you go. Conventions are in [`AGENTS.md`](AGENTS.md).
 
 ## Goal
@@ -233,25 +233,34 @@ Branch: `phase-7/simplify`. Make one commit per item or small group. Every commi
 component and resource tests green without editing what they assert. Delete tests only when they target a removed
 private helper.
 
-- [ ] **R1**: delete `LatestJob` and `get_latest_time_for_responses`. Pass the resource's `{workspace: job}` straight
+- [x] **R1**: delete `LatestJob` and `get_latest_time_for_responses`. Pass the resource's `{workspace: job}` straight
       to `evaluate_jobs`, which parses `timeFinished` itself. Delete or port the tests that call the removed function
       (`get_latest_time_for_responses` cases that still describe reachable behaviour move to `JobScan` tests).
-- [ ] **R2**: replace `parse_cursor` and `cursor_times` with `load_cursor(raw) -> dict[str, datetime]` and
+- [x] **R2**: replace `parse_cursor` and `cursor_times` with `load_cursor(raw) -> dict[str, datetime]` and
       `dump_cursor(cursor) -> str`. `evaluate_jobs` works in datetimes and loops over the configured workspaces
       (sketch in `docs/SPEC.md`). The JSON written to the cursor must stay byte-compatible: add a test that
       round-trips a cursor written by the current code.
-- [ ] **R4**: `request_offset_paginated` yields each page's `items` list instead of the `httpx.Response`, so each page
+- [x] **R4**: `request_offset_paginated` yields each page's `items` list instead of the `httpx.Response`, so each page
       is decoded once. Inline `get_request`. Drop the caller overrides for `limit` and `offset`. Use
       `contextlib.closing` in `get_latest_successful_jobs`. Keep the respx assertions on params and call count.
-- [ ] **R5**: `FMEComponent.build_resource` passes `page_size`/`max_pages` only when set, so defaults live only on
+- [x] **R5**: `FMEComponent.build_resource` passes `page_size`/`max_pages` only when set, so defaults live only on
       `FMEResource`.
-- [ ] **R6**: add `DEFAULT_KEY_PREFIX = ("fme",)` in `assets.py` and use it in `FMEWorkspace`, `build_fme_assets` and
+- [x] **R6**: add `DEFAULT_KEY_PREFIX = ("fme",)` in `assets.py` and use it in `FMEWorkspace`, `build_fme_assets` and
       `FMEWorkspaceSpec`.
-- [ ] **R7**: move `FMEComponent`'s validators below all field declarations.
-- [ ] **R8**: make the job asset description a one-line f-string. Check the existing description test (if any) and
+- [x] **R7**: move `FMEComponent`'s validators below all field declarations.
+- [x] **R8**: make the job asset description a one-line f-string. Check the existing description test (if any) and
       update the expected text.
-- [ ] Gate: lint, format check, pyright, pytest with coverage ≥ 90%, and `lowest-direct`. Record the refactor in
+- [x] Gate: lint, format check, pyright, pytest with coverage ≥ 90%, and `lowest-direct`. Record the refactor in
       `CHANGELOG.md` under *Unreleased* (internal change, no user impact).
+- [x] Notes from Phase 7:
+  - The cursor JSON keeps its format, but key order now follows the configured workspace order rather than the
+    previous cursor's order. JSON consumers don't depend on key order.
+  - `load_cursor` parses values with `parse_fme_time`, so a hand-written `Z` suffix now loads on Python 3.10
+    (it raised before). Naive values are still N-8 (Phase 8).
+  - The `get_latest_time_for_responses` timezone case moved to a `JobScan` test. Its two `ValueError` cases were
+    unreachable and are already covered by `test_scan_raises_for_target_job_without_time` and
+    `test_scan_ignores_jobs_without_workspace_or_time_for_other_workspaces`.
+  - R4 dropped the `limit` override, so the paginator tests now set `page_size=2` on the resource instead.
 
 ### Phase 8: Fix the low-risk bugs
 
