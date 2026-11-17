@@ -23,3 +23,5 @@ monorepo. The entries below are changes from that module's behaviour.
   `repository`, `status`, `time_started` and `time_finished` (timestamps), `duration_seconds`
   (from `elapsedTime`, or from finish minus start), and the full job object as `fme_job` (JSON).
   Fields missing from the job are left out. Before, the raw job dict was passed as metadata.
+- **BUG-9**: The sensor gets its resource with `getattr(context.resources, resource_key)`
+  instead of the internal `original_resource_dict`.

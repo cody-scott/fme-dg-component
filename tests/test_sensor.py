@@ -226,6 +226,5 @@ def test_metadata_omits_missing_fields() -> None:
     assert set(md) == {"workspace", "fme_job"}
 
 
-@pytest.mark.xfail(strict=True, reason="BUG-9: sensor reads resources.original_resource_dict")
 def test_sensor_uses_public_resource_access() -> None:
     assert "original_resource_dict" not in inspect.getsource(sensor_module)

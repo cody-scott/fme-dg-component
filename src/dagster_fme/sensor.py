@@ -208,8 +208,7 @@ def build_fme_sensor(
         """
         # `**_resources` absorbs the resources Dagster passes as kwargs when the sensor
         # is invoked directly (`sensor(context)`); the resource is read from `context`.
-        # BUG-9: reads an internal resources attribute, ported as-is.
-        fme_resource = cast(FMEResource, context.resources.original_resource_dict[fme_resource_key])
+        fme_resource = cast(FMEResource, getattr(context.resources, fme_resource_key))
 
         cursor = parse_cursor(context.cursor)
         latest = get_fme_states(fme_resource)
