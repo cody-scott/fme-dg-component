@@ -48,8 +48,7 @@ def _run_sensor(
     )
     result = sensor(context)
     assert isinstance(result, dg.SensorResult)
-    # Phase 2 still persists via update_cursor (BUG-1), so read it back from the context.
-    return result, parse_cursor(context.cursor)
+    return result, parse_cursor(result.cursor)
 
 
 # --- pure helpers ---------------------------------------------------------------------
@@ -91,6 +90,13 @@ def test_latest_time_parses_z_suffix() -> None:
 def test_latest_time_raises_on_missing_fields(fixture: str, match: str) -> None:
     with pytest.raises(ValueError, match=match):
         get_latest_time_for_responses(_items(fixture))
+
+
+def test_evaluate_carries_forward_configured_and_drops_unconfigured() -> None:
+    prior = {"alpha.fmw": "2026-01-01T00:00:00+00:00", "removed.fmw": "2026-01-01T00:00:00+00:00"}
+    events, cursor = evaluate_jobs(prior, {}, _workspaces())
+    assert events == []
+    assert cursor == {"alpha.fmw": "2026-01-01T00:00:00+00:00"}
 
 
 def test_evaluate_first_sight_is_baseline_only() -> None:
@@ -158,7 +164,7 @@ def test_sensor_ignores_unconfigured_workspaces(
     result = sensor(context)
     assert isinstance(result, dg.SensorResult)
     assert result.asset_events == []
-    assert "gamma-export.fmw" not in parse_cursor(context.cursor)
+    assert "gamma-export.fmw" not in parse_cursor(result.cursor)
 
 
 def test_sensor_definition_settings() -> None:
@@ -171,9 +177,6 @@ def test_sensor_definition_settings() -> None:
 # --- known bugs (fixed in Phase 3) ----------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True, reason="BUG-1: workspaces missing from the response lose their cursor"
-)
 def test_sensor_carries_forward_unseen_workspaces(
     respx_mock: respx.MockRouter, fme_resource: FMEResource
 ) -> None:

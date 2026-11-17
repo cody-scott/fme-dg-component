@@ -85,7 +85,9 @@ def evaluate_jobs(
 
     A workspace seen for the first time is recorded as a baseline and emits nothing.
     A strictly newer ``timeFinished`` than the cursor emits a materialization for
-    every asset spec of that workspace.
+    every asset spec of that workspace. Configured workspaces that have no job in
+    ``latest`` keep their existing cursor value. Cursor entries for workspaces that
+    are no longer configured are dropped.
 
     Args:
         cursor: The parsed current cursor.
@@ -97,7 +99,7 @@ def evaluate_jobs(
     """
     fqn_dict = {a.fqn: a for a in fme_assets}
 
-    new_cursor: dict[str, str] = {}
+    new_cursor: dict[str, str] = {ws: t for ws, t in cursor.items() if ws in fqn_dict}
     events: list[dg.AssetMaterialization] = []
 
     for workspace, item in latest.items():
@@ -123,8 +125,6 @@ def evaluate_jobs(
 
         new_cursor[workspace] = cursor_time
 
-    # BUG-1: workspaces absent from `latest` are dropped from the cursor. The legacy
-    # code had a carry-forward loop, but it ran after the cursor was persisted.
     return events, new_cursor
 
 
@@ -168,7 +168,6 @@ def build_fme_sensor(
         latest = get_fme_states(fme_resource)
         events, new_cursor = evaluate_jobs(cursor, latest, fme_assets)
 
-        context.update_cursor(json.dumps(new_cursor))
-        return dg.SensorResult(asset_events=events)
+        return dg.SensorResult(asset_events=events, cursor=json.dumps(new_cursor))
 
     return _sensor
