@@ -28,7 +28,6 @@ All commands go through `uv`. Don't call `pip`, `python -m venv` or the system `
 | Lint | `uv run ruff check .` |
 | Format | `uv run ruff format .` |
 | Type check | `uv run pyright` |
-| All pre-commit hooks | `uv run pre-commit run --all-files` |
 | Lowest supported deps | `uv sync --resolution lowest-direct && uv run pytest` |
 | Add a runtime dep | `uv add <pkg>` |
 | Add a dev dep | `uv add --dev <pkg>` |
@@ -63,7 +62,6 @@ tests/
   test_component.py
   test_scaffold.py
 .github/workflows/ci.yml
-.pre-commit-config.yaml
 CHANGELOG.md
 README.md
 ```

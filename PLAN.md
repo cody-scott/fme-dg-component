@@ -25,7 +25,7 @@ and handling failed FME jobs (the sensor stays success-only).
 | Job fetching | Filter server-side so only recent or needed jobs are fetched (see Phase 4) |
 | Resource wiring | Optional in-component resource (`host` / `api_key` in YAML), otherwise use the external `resource_key` |
 | HTTP tests | `respx` mocks only |
-| Tooling | ruff (lint+format), pyright, pre-commit, GitHub Actions CI |
+| Tooling | ruff (lint+format), pyright, GitHub Actions CI. pre-commit was removed later (user decision); CI runs the same checks |
 | dg integration | Registry entry point and a custom scaffolder that writes a starter `defs.yaml` |
 | Failed jobs | Not handled (success only) |
 | Old `fme/` dir | Deleted after the port |
@@ -61,11 +61,11 @@ Pin this with a test.
 
 - [x] `uv init --lib --build-backend uv --name dagster-fme`. Confirm it creates `src/dagster_fme/` and `py.typed`.
 - [x] `pyproject.toml`: `requires-python = ">=3.10"`, deps `dagster>=1.11`, `httpx`. Add a description, a README, and the classifiers.
-- [x] Dev deps (`[dependency-groups] dev`): `pytest`, `pytest-cov`, `respx`, `ruff`, `pyright`, `pre-commit`, plus `dagster-dg-cli` if it's needed to test scaffolding (deferred to Phase 5). Notes: `pyright[nodejs]` because the system Node (v10) is too old. (`pre-commit` was briefly capped `<4.6` for git 2.25; git is now 2.50 so the cap is removed.)
+- [x] Dev deps (`[dependency-groups] dev`): `pytest`, `pytest-cov`, `respx`, `ruff`, `pyright`, plus `dagster-dg-cli` if it's needed to test scaffolding (deferred to Phase 5). Notes: `pyright[nodejs]` because the system Node (v10) is too old. (`pre-commit` was also a dev dep until it was removed at the user's request.)
 - [x] Ruff config: line length 100, target `py310`, rules `E,F,I,UP,B,SIM,RUF`, `ruff format`.
 - [x] Pyright config: `include = ["src", "tests"]`, `typeCheckingMode = "standard"`, `pythonVersion = "3.10"`.
 - [x] Pytest config: `testpaths = ["tests"]`, `addopts = "-ra --strict-markers"`, `xfail_strict = true`.
-- [x] `.pre-commit-config.yaml`: ruff (check + format), basic hooks (trailing whitespace, EOF, check-yaml/toml), and a local hook for pyright via `uv run`.
+- [x] ~~`.pre-commit-config.yaml`~~: added in Phase 1, later removed at the user's request. CI runs ruff check, ruff format `--check`, pyright and pytest.
 - [x] `.github/workflows/ci.yml` (landed after Phase 2 once the token had `workflow` scope): use `astral-sh/setup-uv`, matrix Python 3.10–3.13, steps `uv sync --locked`, ruff check, ruff format `--check`, pyright, pytest with coverage. Add a separate job with `--resolution lowest-direct` to prove the `dagster>=1.11` floor.
 - [x] Commit `uv.lock`.
 - [x] Gate: `uv sync && uv run pytest` runs (no tests yet is fine), and lint and pyright are clean.
@@ -177,7 +177,7 @@ Do one bug per commit. In each commit, remove that bug's xfail marker so it beco
       and the dev commands.
 - [ ] Component docstring and field descriptions (`Field(description=...)`), so `dg` shows useful help.
 - [ ] Delete the original `fme/` directory.
-- [ ] Final gate: `uv run pre-commit run --all-files`, pytest coverage of at least 90%, and the lowest-direct job passes.
+- [ ] Final gate: `uv run ruff check .`, `uv run ruff format --check .`, `uv run pyright`, pytest coverage of at least 90%, and the lowest-direct job passes.
 - [ ] Commit: `Phase 6: docs, remove legacy fme module`.
 - [ ] Ask the user before pushing the `phase-6/...` branch or opening its PR.
 
