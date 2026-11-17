@@ -107,10 +107,16 @@ The package must not import `snowflake_analytics` or any other monorepo code.
 
 ## Git workflow
 
-- `main` holds the initial import. All rebuild work happens on the `rebuild/uv-package` branch.
-- Make one commit per completed phase in `PLAN.md`, or smaller commits within a phase. Each commit should leave the tree passing.
+- `main` is the integration branch and only changes through merged PRs. Don't commit to it directly.
+- Each phase in `PLAN.md` gets its own branch named `phase-<n>/<short-slug>` (e.g. `phase-3/fix-bugs`),
+  cut from an up-to-date `main` (`git switch main && git pull && git switch -c phase-<n>/<slug>`).
+  Work that falls outside a phase follows the same pattern with a descriptive slug.
+- Make one commit per completed phase, or smaller commits within a phase. Each commit should leave the tree passing.
+- When the phase is done, push its branch and open a PR to `main`. The user reviews and merges it.
+  Start the next phase from the updated `main`, not from the previous phase branch.
 - Commit messages use the imperative mood and reference the phase or bug ID (e.g. `Fix BUG-1: preserve cursor for unseen workspaces`).
 - Don't push, open PRs, or rewrite published history without explicit approval from the user.
+- Don't commit `uv.lock` changes made by `--resolution lowest-direct` runs. Restore it with `git checkout uv.lock`.
 
 ## When unsure
 
