@@ -1,0 +1,174 @@
+"""Sensor that turns successful FME jobs into asset materializations.
+
+The decision logic lives in pure functions (job JSON in, events and cursor out) so it
+can be tested without Dagster contexts or HTTP. ``build_fme_sensor`` only wires them up.
+"""
+
+from __future__ import annotations
+
+import datetime
+import json
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, TypedDict, cast
+
+import dagster as dg
+import httpx
+
+from dagster_fme.assets import FMEWorkspace
+from dagster_fme.resource import FMEResource
+
+
+class LatestJob(TypedDict):
+    """The most recent finished job seen for a workspace."""
+
+    id: Any
+    time_finished: datetime.datetime
+    data: dict[str, Any]
+
+
+def parse_cursor(cursor: str | None) -> dict[str, str]:
+    """Parse the sensor cursor, ``{"<workspace>": "<ISO-8601 timeFinished>"}``.
+
+    An empty or missing cursor parses to ``{}``.
+    """
+    if cursor is None or cursor == "":
+        return {}
+    return json.loads(cursor)
+
+
+def extract_jobs(pages: Iterable[httpx.Response]) -> list[dict[str, Any]]:
+    """Flatten the ``items`` of every ``/jobs`` page into one list."""
+    return [item for page in pages for item in page.json().get("items") or []]
+
+
+def get_latest_time_for_responses(responses: Sequence[dict[str, Any]]) -> dict[str, LatestJob]:
+    """Pick the latest-finishing job for each workspace.
+
+    Args:
+        responses: Job objects from the FME ``/jobs`` endpoint.
+
+    Returns:
+        A mapping of raw workspace name to its latest job.
+
+    Raises:
+        ValueError: If a job has no ``workspace`` or no ``timeFinished``.
+    """
+    output: dict[str, LatestJob] = {}
+
+    for job in responses:
+        workspace = job.get("workspace")
+        raw_time_finished = job.get("timeFinished")
+
+        if workspace is None:
+            dg.get_dagster_logger().error(job)
+            raise ValueError("Workspace cannot be None")
+
+        if raw_time_finished is None:
+            dg.get_dagster_logger().error(job)
+            raise ValueError("Time finished cannot be None")
+
+        time_finished = datetime.datetime.fromisoformat(raw_time_finished.replace("Z", "+00:00"))
+        save: LatestJob = {"id": job.get("id"), "time_finished": time_finished, "data": job}
+
+        if workspace not in output or output[workspace]["time_finished"] < time_finished:
+            output[workspace] = save
+
+    return output
+
+
+def evaluate_jobs(
+    cursor: Mapping[str, str],
+    latest: Mapping[str, LatestJob],
+    fme_assets: Sequence[FMEWorkspace],
+) -> tuple[list[dg.AssetMaterialization], dict[str, str]]:
+    """Decide which materializations to emit and compute the next cursor.
+
+    A workspace seen for the first time is recorded as a baseline and emits nothing.
+    A strictly newer ``timeFinished`` than the cursor emits a materialization for
+    every asset spec of that workspace.
+
+    Args:
+        cursor: The parsed current cursor.
+        latest: The latest job per workspace, from ``get_latest_time_for_responses``.
+        fme_assets: The configured workspaces.
+
+    Returns:
+        The materializations to emit and the new cursor.
+    """
+    fqn_dict = {a.fqn: a for a in fme_assets}
+
+    new_cursor: dict[str, str] = {}
+    events: list[dg.AssetMaterialization] = []
+
+    for workspace, item in latest.items():
+        asset_obj = fqn_dict.get(workspace)
+        if asset_obj is None:
+            continue
+
+        time_finished = item["time_finished"]
+        last_time_str = cursor.get(workspace)
+
+        if last_time_str is None:
+            new_cursor[workspace] = time_finished.isoformat()
+            continue
+
+        cursor_time = last_time_str
+        if time_finished > datetime.datetime.fromisoformat(last_time_str):
+            cursor_time = time_finished.isoformat()
+            events.extend(
+                # BUG-3: raw job dict as metadata, ported as-is.
+                dg.AssetMaterialization(spec.key, metadata=item["data"])
+                for spec in asset_obj.asset_specs
+            )
+
+        new_cursor[workspace] = cursor_time
+
+    # BUG-1: workspaces absent from `latest` are dropped from the cursor. The legacy
+    # code had a carry-forward loop, but it ran after the cursor was persisted.
+    return events, new_cursor
+
+
+def get_fme_data(fme: FMEResource) -> list[dict[str, Any]]:
+    """Fetch every successful job from FME Flow."""
+    return extract_jobs(fme.request_offset_paginated("/jobs", params={"status": "success"}))
+
+
+def get_fme_states(fme: FMEResource) -> dict[str, LatestJob]:
+    """Fetch successful jobs and reduce them to the latest job per workspace."""
+    return get_latest_time_for_responses(get_fme_data(fme))
+
+
+def build_fme_sensor(
+    fme_assets: Sequence[FMEWorkspace],
+    sensor_name: str,
+    fme_resource_key: str,
+    minimum_interval_seconds: int = 60,
+) -> dg.SensorDefinition:
+    """
+    Return a sensor that checks for the status of FME packages
+    Sensor will return materialization events for the assets defined in
+    `FMEAsset.asset_list`
+    """
+
+    @dg.sensor(
+        name=sensor_name,
+        minimum_interval_seconds=minimum_interval_seconds,
+        required_resource_keys={fme_resource_key},
+    )
+    def _sensor(context: dg.SensorEvaluationContext, **_resources: Any) -> dg.SensorResult:
+        """
+        cursor will be fqn of the ssis package + last runtime
+        """
+        # `**_resources` absorbs the resources Dagster passes as kwargs when the sensor
+        # is invoked directly (`sensor(context)`); the resource is read from `context`.
+        # BUG-9: reads an internal resources attribute, ported as-is.
+        fme_resource = cast(FMEResource, context.resources.original_resource_dict[fme_resource_key])
+
+        cursor = parse_cursor(context.cursor)
+        latest = get_fme_states(fme_resource)
+        events, new_cursor = evaluate_jobs(cursor, latest, fme_assets)
+
+        context.update_cursor(json.dumps(new_cursor))
+        return dg.SensorResult(asset_events=events)
+
+    return _sensor

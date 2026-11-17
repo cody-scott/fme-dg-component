@@ -1,0 +1,31 @@
+{
+  "items": [
+    {
+      "id": 201,
+      "description": "",
+      "engineHost": "engine-host",
+      "engineName": "engine-1",
+      "repository": "Samples",
+      "queue": "Default",
+      "queueType": "system",
+      "sourceID": "",
+      "sourceName": "",
+      "sourceType": "automations",
+      "status": "success",
+      "timeQueued": "2026-01-03T10:00:00Z",
+      "timeStarted": "2026-01-03T10:00:00Z",
+      "timeFinished": "2026-01-03T10:05:00Z",
+      "runtimeUsername": "svc-runner",
+      "elapsedTime": 60000,
+      "cpuTime": 1000,
+      "cpuPercent": 12.5,
+      "peakMemoryUsage": 2048,
+      "lineCount": 100,
+      "warningCount": 0,
+      "errorCount": 0
+    }
+  ],
+  "totalCount": 1,
+  "limit": 1000,
+  "offset": 0
+}
