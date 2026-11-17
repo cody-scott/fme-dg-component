@@ -14,6 +14,7 @@ import respx
 import dagster_fme.sensor as sensor_module
 from dagster_fme import FMEResource, FMEWorkspace, build_fme_assets, build_fme_sensor
 from dagster_fme.sensor import (
+    build_materialization_metadata,
     evaluate_jobs,
     get_latest_time_for_responses,
     parse_cursor,
@@ -190,7 +191,6 @@ def test_sensor_carries_forward_unseen_workspaces(
     assert json.loads(result.cursor) == prior
 
 
-@pytest.mark.xfail(strict=True, reason="BUG-3: raw job dict passed as materialization metadata")
 def test_materialization_metadata_is_typed() -> None:
     latest = get_latest_time_for_responses(_items("jobs_page_1.json"))
     events, _ = evaluate_jobs(
@@ -204,6 +204,26 @@ def test_materialization_metadata_is_typed() -> None:
     assert isinstance(md["time_started"], dg.TimestampMetadataValue)
     assert isinstance(md["time_finished"], dg.TimestampMetadataValue)
     assert isinstance(md["fme_job"], dg.JsonMetadataValue)
+    assert md["time_finished"].value == datetime.datetime(2026, 1, 2, 10, 5, tzinfo=UTC).timestamp()
+    # elapsedTime is 60000 ms in the fixture.
+    assert md["duration_seconds"] == dg.MetadataValue.float(60.0)
+
+
+def test_metadata_duration_falls_back_to_start_and_finish() -> None:
+    md = build_materialization_metadata(
+        {
+            "id": 7,
+            "timeStarted": "2026-01-02T10:00:00Z",
+            "timeFinished": "2026-01-02T10:05:00+00:00",
+        }
+    )
+    assert md["duration_seconds"] == dg.MetadataValue.float(300.0)
+    assert "workspace" not in md
+
+
+def test_metadata_omits_missing_fields() -> None:
+    md = build_materialization_metadata({"workspace": "alpha.fmw"})
+    assert set(md) == {"workspace", "fme_job"}
 
 
 @pytest.mark.xfail(strict=True, reason="BUG-9: sensor reads resources.original_resource_dict")

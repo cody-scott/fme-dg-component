@@ -19,3 +19,7 @@ monorepo. The entries below are changes from that module's behaviour.
   Before, they were dropped and later re-baselined without emitting anything. Entries for
   workspaces that are no longer configured are still dropped. The sensor now returns its cursor
   through `SensorResult(cursor=...)` and no longer calls `context.update_cursor`.
+- **BUG-3**: Materialization metadata is typed. Each event carries `fme_job_id`, `workspace`,
+  `repository`, `status`, `time_started` and `time_finished` (timestamps), `duration_seconds`
+  (from `elapsedTime`, or from finish minus start), and the full job object as `fme_job` (JSON).
+  Fields missing from the job are left out. Before, the raw job dict was passed as metadata.

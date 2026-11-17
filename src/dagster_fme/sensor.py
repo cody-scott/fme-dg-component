@@ -26,6 +26,53 @@ class LatestJob(TypedDict):
     data: dict[str, Any]
 
 
+def parse_fme_time(value: str) -> datetime.datetime:
+    """Parse an FME ISO-8601 timestamp, accepting a ``Z`` suffix or a UTC offset."""
+    return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def build_materialization_metadata(job: Mapping[str, Any]) -> dict[str, dg.MetadataValue]:
+    """Turn an FME job object into typed Dagster metadata.
+
+    Fields missing from the job are left out. ``duration_seconds`` comes from
+    ``elapsedTime`` (milliseconds) when present, otherwise from ``timeFinished``
+    minus ``timeStarted``. The full job object is kept under ``fme_job``.
+
+    Args:
+        job: One job object from the FME ``/jobs`` endpoint.
+
+    Returns:
+        Metadata for an ``AssetMaterialization``.
+    """
+    metadata: dict[str, dg.MetadataValue] = {}
+
+    job_id = job.get("id")
+    if isinstance(job_id, int):
+        metadata["fme_job_id"] = dg.MetadataValue.int(job_id)
+
+    for key in ("workspace", "repository", "status"):
+        value = job.get(key)
+        if value is not None:
+            metadata[key] = dg.MetadataValue.text(str(value))
+
+    times: dict[str, datetime.datetime] = {}
+    for api_key, md_key in (("timeStarted", "time_started"), ("timeFinished", "time_finished")):
+        raw = job.get(api_key)
+        if isinstance(raw, str):
+            times[md_key] = parse_fme_time(raw)
+            metadata[md_key] = dg.MetadataValue.timestamp(times[md_key])
+
+    elapsed_ms = job.get("elapsedTime")
+    if isinstance(elapsed_ms, (int, float)) and not isinstance(elapsed_ms, bool):
+        metadata["duration_seconds"] = dg.MetadataValue.float(elapsed_ms / 1000)
+    elif "time_started" in times and "time_finished" in times:
+        duration = times["time_finished"] - times["time_started"]
+        metadata["duration_seconds"] = dg.MetadataValue.float(duration.total_seconds())
+
+    metadata["fme_job"] = dg.MetadataValue.json(dict(job))
+    return metadata
+
+
 def parse_cursor(cursor: str | None) -> dict[str, str]:
     """Parse the sensor cursor, ``{"<workspace>": "<ISO-8601 timeFinished>"}``.
 
@@ -67,7 +114,7 @@ def get_latest_time_for_responses(responses: Sequence[dict[str, Any]]) -> dict[s
             dg.get_dagster_logger().error(job)
             raise ValueError("Time finished cannot be None")
 
-        time_finished = datetime.datetime.fromisoformat(raw_time_finished.replace("Z", "+00:00"))
+        time_finished = parse_fme_time(raw_time_finished)
         save: LatestJob = {"id": job.get("id"), "time_finished": time_finished, "data": job}
 
         if workspace not in output or output[workspace]["time_finished"] < time_finished:
@@ -117,9 +164,9 @@ def evaluate_jobs(
         cursor_time = last_time_str
         if time_finished > datetime.datetime.fromisoformat(last_time_str):
             cursor_time = time_finished.isoformat()
+            metadata = build_materialization_metadata(item["data"])
             events.extend(
-                # BUG-3: raw job dict as metadata, ported as-is.
-                dg.AssetMaterialization(spec.key, metadata=item["data"])
+                dg.AssetMaterialization(spec.key, metadata=metadata)
                 for spec in asset_obj.asset_specs
             )
 
